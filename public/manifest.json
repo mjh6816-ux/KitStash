@@ -1,0 +1,17 @@
+{
+  "name": "KitStash",
+  "short_name": "KitStash",
+  "description": "Scale model inventory & project tracker for the workbench.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#09090b",
+  "theme_color": "#18181b",
+  "orientation": "portrait",
+  "icons": [
+    {
+      "src": "/file.svg",
+      "sizes": "any",
+      "type": "image/svg+xml"
+    }
+  ]
+}

@@ -42,7 +42,7 @@ Write-Host "1. Create a new repo on GitHub (https://github.com/new) - name it 'k
 Write-Host "   DO NOT initialize it with README, .gitignore, or license."
 Write-Host ""
 Write-Host "2. Then run these commands (replace YOUR_USERNAME):"
-Write-Host '   git remote add origin https://github.com/YOUR_USERNAME/kit-stash.git' -ForegroundColor White
+Write-Host '   git remote add origin https://github.com/YOUR_USERNAME/KitStash.git' -ForegroundColor White
 Write-Host '   git branch -M main' -ForegroundColor White
 Write-Host '   git push -u origin main' -ForegroundColor White
 Write-Host ""

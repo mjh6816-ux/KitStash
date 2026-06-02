@@ -31,9 +31,16 @@ Then create a **new empty repo** on GitHub (https://github.com/new). **Do not** 
 Push with (replace YOUR_USERNAME):
 
 ```powershell
-git remote add origin https://github.com/YOUR_USERNAME/kit-stash.git
+git remote add origin https://github.com/YOUR_USERNAME/KitStash.git
 git branch -M main
 git push -u origin main
+
+**Note on repo name casing:** GitHub repo names are case-insensitive for access, but the "official" URL uses the casing you chose when creating the repo (often TitleCase like KitStash). If GitHub says "This repository moved" during push (as happened in the original deployment), just run:
+
+git remote set-url origin https://github.com/YOUR_USERNAME/KitStash.git
+git push -u origin main
+
+(You can also update the remote in your local clone right after the first push. The author had to do `git remote set-url origin https://github.com/mjh6816-ux/KitStash.git` after the initial push to the lowercase version.)
 ```
 
 ## Step 2: Deploy on Vercel

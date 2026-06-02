@@ -5,56 +5,51 @@ The app now supports PWA features (installable on your phone's home screen). For
 **Updated for race cars:** Since you mostly build race cars, the current icons feature stylized scale model race cars (NASCAR/F1 style) in kit boxes. Two variations are included.
 
 ## Current Setup
-- `public/manifest.json` references icons in `/icons/`
-- Layout has apple touch icon support
-- Currently using a generated starting image at `public/icons/icon-512.jpg` (with JPG fallbacks for 512px and apple-touch-icon while you prepare proper PNGs).
+- `public/manifest.json` references the race-car v2 icons (PNG preferred for transparency + maskable)
+- `app/layout.tsx` has proper apple touch icon support (prefers .png)
+- You have created:
+  - icon-512-racecar-v2.png (transparent 512px, main PWA + maskable icon)
+  - apple-touch-icon.png (for iOS home screen)
+- JPG fallbacks remain for compatibility during transition.
 
 ## Quick Way to Generate All Required Icons
 
-1. **Download the generated icon** (or create your own):
-   - Two new AI-generated race car themed icons (since you mostly build race cars):
-     - `public/icons/icon-512-racecar-v2.jpg` (the v2 you like — clean line-art low-slung race car) ← this is now the primary
-     - `public/icons/icon-512-racecar-v2-transparent-base.jpg` (the edited version intended as a starting point for removing the black background)
-   - Also updated `apple-touch-icon.jpg` to the v2.
+1. **You have created the icons** (great!):
+   - `public/icons/icon-512-racecar-v2.png` (your transparent 512px version — primary for PWA)
+   - `public/icons/apple-touch-icon.png` (your new one for iOS)
+   - JPG fallbacks are still there for compatibility.
    - **About the black background and transparency:**
-     - JPG files (like the current ones) have a solid opaque black background — no transparency.
-     - For proper PWA "maskable" icons (especially on Android), you want a **PNG with transparent background**. This allows the operating system to apply its own icon shape/mask without a hard black square showing.
-     - Use `icon-512-racecar-v2-transparent-base.jpg` (or the main v2.jpg) as starting point.
-     - Go to https://www.photopea.com/ (free, browser-based, no install).
-     - File > Open the base jpg.
-     - Use Magic Wand tool (tolerance ~20-30), click the black areas, Select > Inverse if needed, then Delete to remove black (you should see checkerboard = transparent).
-     - For best maskable: ensure the race car is centered with ~20% padding on all sides.
-     - Image > Image Size to make 512x512 and 192x192 versions.
-     - Export as PNG (File > Export As > PNG).
-     - Save as `icon-512-racecar-v2.png` and `icon-192-racecar-v2.png` in public/icons/.
+     - JPG files have a solid opaque black background — no transparency.
+     - The PNG you created has transparent background (checkerboard in editors), which is what we want for maskable icons on Android etc. The system can now shape the icon properly without a black box.
 
-2. **Best free tool: RealFaviconGenerator** (recommended)
+2. **(Optional) Best free tool for complete favicon set: RealFaviconGenerator**
    - Go to: https://realfavicongenerator.net/
-   - Upload your base image (the 512px one)
+   - Upload your base image (e.g. the 512px png or jpg)
    - Configure:
      - App name: KitStash
      - Theme color: #18181b (matches the app)
      - Background color: #09090b
    - Generate and download the package.
-   - Copy the generated `icons/` folder contents into your `public/icons/`
-   - It will also give you updated `<link>` tags — we can add them to layout.tsx if needed.
+   - It will give you all sizes + a favicon.ico, and updated link tags if you want to enhance the head.
 
-3. **Alternative: Manual sizes (if you have an image editor)**
-   Create these PNG files in `public/icons/`:
+3. **(Optional) Manual sizes (if you want to add the 192px or favicon.ico)**
+   Create these PNG files in `public/icons/` if missing:
 
    | File                          | Size     | Purpose                     |
    |-------------------------------|----------|-----------------------------|
-   | icon-512-racecar-v2.png       | 512x512  | PWA high-res + maskable     |
-   | icon-192-racecar-v2.png       | 192x192  | PWA standard icon (recommended, add when ready) |
-   | apple-touch-icon.png          | 180x180  | iOS / Safari home screen (optional, create if you want transparent version) |
+   | icon-512-racecar-v2.png       | 512x512  | PWA high-res + maskable (you have this) |
+   | icon-192-racecar-v2.png       | 192x192  | PWA standard icon (recommended) |
+   | apple-touch-icon.png          | 180x180  | iOS / Safari home screen (you have this) |
    | favicon-32x32.png             | 32x32    | Browser tab (optional)      |
 
    - Make the icon square with safe padding (important for "maskable" icons).
-   - For the transparent PNG version: remove the black background entirely so the race car is on transparent. The icon itself uses dark lines on the car with amber accents.
+   - The transparent PNG version should have the black background removed so the race car is on transparent. The icon itself uses dark lines on the car with amber accents.
    - For maskable: keep important content in the center 80% circle.
 
-4. **Update the manifest** (after adding files)
-   The manifest is already configured for `icon-512-racecar-v2.png` (with maskable) and the JPG fallback. Add the 192 version when you create it.
+4. **Manifest & Layout**
+   The `public/manifest.json` is already set up to use your new PNGs (512 first with maskable, then 192 placeholder, JPG fallback).
+   The layout in `app/layout.tsx` already prefers the apple-touch-icon.png you created.
+   No code changes needed unless you use different filenames.
 
 ## Design Ideas for KitStash Icon (Race Car Theme)
 - Dark charcoal background (#18181b)
@@ -66,12 +61,12 @@ The app now supports PWA features (installable on your phone's home screen). For
 - Keep important details centered for maskable icons
 
 ## After Adding Icons
-- You now have the transparent 512 PNG for v2 (icon-512-racecar-v2.png). The manifest already includes both 512 and 192 entries.
-- Create a 192x192 version too for best results (name it icon-192-racecar-v2.png).
-- Optionally create apple-touch-icon.png for a transparent iOS icon.
+- You now have the transparent 512 PNG for v2 (icon-512-racecar-v2.png) and apple-touch-icon.png.
+- Create icon-192-racecar-v2.png when ready for complete coverage (the manifest has the entry).
+- JPG fallbacks are still present (harmless).
 - Rebuild and redeploy: `npm run build` then push to GitHub (Vercel will pick it up)
-- Test on phone: Add to Home Screen and check the icon looks good (no weird cropping)
+- Test on phone: Add to Home Screen and check the icon looks good (no weird cropping, transparent background for maskable)
 
-If you create or generate new icons and want me to update any code (manifest, layout, etc.), just drop the files in `public/icons/` and let me know the filenames!
+If you create additional icons (like the 192px version) or generate new variations and want me to update any code (manifest, layout, etc.), just drop the files in `public/icons/` and let me know the filenames!
 
 Need help with a specific design prompt for another AI-generated icon? I can generate variations.

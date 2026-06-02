@@ -23,7 +23,15 @@ export const metadata: Metadata = {
   },
   description: "Scale model inventory & project tracker for the workbench. Track kits, aftermarket parts, paints, and build allocations with automatic stock deduction.",
   icons: {
-    icon: "/favicon.ico",
+    icon: [
+      { url: "/icons/icon-512-racecar-v2.png", sizes: "512x512" },
+      { url: "/icons/icon-192-racecar-v2.png", sizes: "192x192" },
+      { url: "/icons/icon-512-racecar-v2.jpg", sizes: "512x512" },
+    ],
+    apple: [
+      { url: "/icons/apple-touch-icon.png" },
+      { url: "/icons/apple-touch-icon.jpg" },
+    ],
   },
   manifest: "/manifest.json",
   appleWebApp: {

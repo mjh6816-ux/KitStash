@@ -1,0 +1,116 @@
+# Deploying KitStash (Vercel + Password Protection)
+
+This is the recommended path for getting a stable, always-on HTTPS URL you can use from your phone or anywhere (garage, travel, etc.).
+
+The app is a single-user personal tool. We use Vercel's built-in password protection for security with zero extra code.
+
+## Prerequisites
+- A GitHub account (free)
+- A Vercel account (free, sign in with GitHub)
+- Your Supabase project credentials ready (URL, anon key, service role key, and your user UUID)
+
+## Step 1: Initialize Git (if not done)
+
+On your machine, in the `kit-stash` folder, you can run the helper:
+
+```powershell
+# Windows PowerShell (recommended)
+.\init-git.ps1
+```
+
+Or do it manually:
+
+```powershell
+git init
+git add .
+git commit -m "Prepare for production deploy - env var user ID, cleaned hacks, vercel config"
+```
+
+Then create a **new empty repo** on GitHub (https://github.com/new). **Do not** check the boxes to add README, .gitignore, or license.
+
+Push with (replace YOUR_USERNAME):
+
+```powershell
+git remote add origin https://github.com/YOUR_USERNAME/kit-stash.git
+git branch -M main
+git push -u origin main
+```
+
+## Step 2: Deploy on Vercel
+
+1. Go to https://vercel.com/new
+2. Import your GitHub repo (`kit-stash`)
+3. Vercel will detect it as a Next.js project automatically.
+4. **Do NOT deploy yet** — click "Configure" or go to the Environment Variables section first.
+
+## Step 3: Set Environment Variables (critical)
+
+In the Vercel import screen (or after import: Project → Settings → Environment Variables), add these **exactly**:
+
+### Public variables (available to browser):
+- `NEXT_PUBLIC_SUPABASE_URL` → your Supabase project URL (e.g. https://xxx.supabase.co)
+- `NEXT_PUBLIC_SUPABASE_ANON_KEY` → the `anon` / `public` key from Supabase
+
+### Secret / Server-only variables:
+- `SUPABASE_SERVICE_ROLE_KEY` → the `service_role` key (mark this one as **Secret** or just don't prefix with NEXT_PUBLIC_)
+- `SUPABASE_USER_ID` → your Supabase auth user UUID (the same one used locally, e.g. a8e4287a-040b-41dd-ba45-87f6a3c07395)
+
+**Important**:
+- Never set `NEXT_PUBLIC_SUPABASE_SERVICE_ROLE_KEY` in production.
+- The `SUPABASE_USER_ID` replaces the old hardcoded value.
+
+After adding the variables, trigger the deploy.
+
+## Step 4: Enable Password Protection (security for personal use)
+
+After the first successful deploy:
+
+1. Go to your project on Vercel → **Settings** → **General**
+2. Scroll to **Vercel Authentication**
+3. Turn on **Password Protection**
+4. Set a strong password you will remember (this is for you only)
+
+Now the entire site (including the API routes / server actions) is protected by that password. Anyone without it gets a login screen from Vercel.
+
+## Step 5: Test from Phone (the whole point)
+
+1. On your phone, open the production URL (https://your-project.vercel.app) **using mobile data** (not home Wi-Fi).
+2. Enter the password.
+3. Test:
+   - Open Inventory → add a part using the camera button (should work reliably over HTTPS).
+   - Global search
+   - Projects + allocations
+   - Dashboard / Reports
+   - Export ZIP
+
+If camera doesn't prompt, make sure you're on a secure origin (https) and using a modern browser (Chrome/Safari).
+
+## Step 6: Ongoing updates
+
+Every time you `git push` to the main branch, Vercel will automatically rebuild and deploy.
+
+To update env vars later: Project → Settings → Environment Variables → Redeploy.
+
+## Optional next improvements (after it's working remotely)
+
+- Add a real Supabase Auth login flow (we can implement this later).
+- Custom domain (Vercel makes it easy).
+- Make it a PWA so you can "install" it on your phone home screen.
+- Add more robust error boundaries or logging.
+
+## Troubleshooting common issues
+
+- **"Missing env var" errors**: Double-check the names match exactly (case sensitive). Redeploy after changing vars.
+- **Camera not working**: Must be HTTPS. Password protection page is also HTTPS.
+- **Old data / caching**: Hard refresh (Ctrl+Shift+R) or wait a minute after deploy.
+- **Service role exposed**: Make sure you did **not** create a `NEXT_PUBLIC_SUPABASE_SERVICE_ROLE_KEY` variable.
+
+## Your current local setup still works
+
+`npm run dev` continues to use `.env.local` exactly as before.
+
+---
+
+You're now set up to use KitStash reliably away from home.
+
+If you run into any issues during the GitHub / Vercel steps, paste the error here and we'll fix it together.

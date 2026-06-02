@@ -8,7 +8,7 @@
   ┬╖ serverActions
 
   Creating an optimized production build ...
-Γ£ô Compiled successfully in 1363ms
+Γ£ô Compiled successfully in 1229ms
   Running TypeScript ...
   Finished TypeScript in 2.3s ...
   Collecting page data using 9 workers ...
@@ -16,7 +16,7 @@
   Generating static pages using 9 workers (1/7) 
   Generating static pages using 9 workers (3/7) 
   Generating static pages using 9 workers (5/7) 
-Γ£ô Generating static pages using 9 workers (7/7) in 338ms
+Γ£ô Generating static pages using 9 workers (7/7) in 326ms
   Finalizing page optimization ...
 
 Route (app)
@@ -27,8 +27,6 @@ Route (app)
 Γö£ Γùï /projects
 Γöö Γùï /reports
 
-
-╞Æ Proxy (Middleware)
 
 Γùï  (Static)   prerendered as static content
 ╞Æ  (Dynamic)  server-rendered on demand

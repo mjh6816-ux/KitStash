@@ -12,7 +12,7 @@ export default function KitStashHome() {
         <h1 className="mb-4 text-6xl font-semibold tracking-[-2.5px] text-white">KitStash</h1>
         <p className="mb-8 max-w-md text-xl text-zinc-400">
           Scale model inventory &amp; project tracker.<br />
-          Built for the workbench.
+          Built for the workbench. PWA-ready with custom icons.
         </p>
 
         <div className="flex flex-col gap-3 sm:flex-row sm:justify-center">

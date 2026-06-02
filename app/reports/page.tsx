@@ -14,6 +14,8 @@ export default function ReportsPage() {
   const [allocations, setAllocations] = useState<any[]>([]);
   const [needed, setNeeded] = useState<any[]>([]);
 
+  const [researchText, setResearchText] = useState('');
+
   useEffect(() => {
     (async () => {
       setLoading(true);
@@ -53,6 +55,28 @@ export default function ReportsPage() {
       console.error("Export failed:", error);
       alert("Export failed. Please try again.");
     }
+  };
+
+  // Simple client CSV downloader for report sections (polish)
+  const downloadCSV = (rows: any[], filename: string) => {
+    if (!rows || rows.length === 0) return;
+    const headers = Object.keys(rows[0]);
+    const csv = [
+      headers.join(','),
+      ...rows.map(r => headers.map(h => {
+        const val = r[h];
+        if (val == null) return '';
+        const s = String(val).replace(/"/g, '""');
+        return /[,\n"]/.test(s) ? `"${s}"` : s;
+      }).join(','))
+    ].join('\n');
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(blob);
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
   };
 
   // Compute reports data
@@ -121,12 +145,77 @@ export default function ReportsPage() {
     };
   }).sort((a: any, b: any) => (b.allocatedCurrent || 0) - (a.allocatedCurrent || 0));
 
+  // Valuation research list - clean manufacturer/scale/name + values for external MSRP/current value research
+  const researchKits = kits.map((k: any) => ({
+    category: 'Kit',
+    manufacturer: k.manufacturer?.name || 'Unknown',
+    scale: k.scale?.name || '',
+    name: k.name,
+    paid: k.price_paid ?? 0,
+    current: k.current_value ?? 0,
+  }));
+  const researchParts = parts.map((p: any) => ({
+    category: 'Part',
+    manufacturer: p.manufacturer?.name || 'Unknown',
+    scale: p.scale?.name || '',
+    name: p.name,
+    paid: p.price_paid ?? 0,
+    current: p.current_value ?? 0,
+  }));
+  const researchPaints = paints.map((p: any) => ({
+    category: 'Paint',
+    manufacturer: p.paint_brand?.name || p.brand || 'Unknown',
+    scale: '',
+    name: p.color_name,
+    paid: p.price_paid ?? 0,
+    current: p.current_value ?? 0,
+  }));
+  const researchItems = [...researchKits, ...researchParts, ...researchPaints];
+
+  const generateResearchText = () => {
+    let t = 'KitStash Valuation Research List\n\n';
+    t += 'Copy-paste this into Grok (or web searches) to research original MSRP and current market values.\n';
+    t += 'Then update each item\'s price_paid / current_value manually in the Inventory > Edit forms.\n';
+    t += '(No bulk import for simplicity - keep it easy.)\n\n';
+
+    t += '=== KITS ===\n';
+    researchKits.forEach(item => {
+      const s = item.scale ? `${item.scale} ` : '';
+      t += `- ${item.manufacturer} ${s}${item.name} (paid: $${item.paid}, current: $${item.current})\n`;
+    });
+
+    t += '\n=== PARTS ===\n';
+    researchParts.forEach(item => {
+      const s = item.scale ? `${item.scale} ` : '';
+      t += `- ${item.manufacturer} ${s}${item.name} (paid: $${item.paid}, current: $${item.current})\n`;
+    });
+
+    t += '\n=== PAINTS ===\n';
+    researchPaints.forEach(item => {
+      t += `- ${item.manufacturer} ${item.name} (paid: $${item.paid}, current: $${item.current})\n`;
+    });
+
+    setResearchText(t);
+  };
+
+  const downloadResearchCSV = () => {
+    const rows = researchItems.map(item => ({
+      category: item.category,
+      manufacturer: item.manufacturer,
+      scale: item.scale,
+      name: item.name,
+      paid: item.paid,
+      current: item.current,
+    }));
+    downloadCSV(rows, 'kitstash-valuation-research.csv');
+  };
+
   return (
     <div className="p-6 md:p-8 max-w-7xl mx-auto">
       <div className="flex flex-col md:flex-row md:items-end md:justify-between gap-4 mb-8">
         <div>
           <h1 className="text-3xl font-semibold tracking-tight">Reports</h1>
-          <p className="text-zinc-400 mt-1">Stock levels, value breakdowns, project summaries, and exports.</p>
+          <p className="text-zinc-400 mt-1">Stock levels, value breakdowns, project summaries, full ZIP export, and a clean list for MSRP/current value research.</p>
         </div>
         <Button onClick={handleExport} size="lg" className="gap-2">
           <Download className="h-4 w-4" /> Download Full Export (ZIP)
@@ -141,13 +230,52 @@ export default function ReportsPage() {
         <div className="text-zinc-400">The ZIP contains CSVs for kits, parts, paints, allocations history, projects, and more. Safe for long-term archival.</div>
       </div>
 
+      {/* Valuation Research Export - straight text/CSV for external MSRP + current value research */}
+      <div className="mb-8">
+        <h2 className="text-xl font-semibold mb-2">Valuation Research Export</h2>
+        <p className="text-sm text-zinc-400 mb-3">
+          Clean list with manufacturer + scale + name + your existing paid/current values.
+          Copy the text below and paste into Grok (or any search) to research original MSRP and updated market values.
+          Then manually update each item in Inventory &gt; Edit (kept deliberately simple - no complex import).
+        </p>
+        <div className="flex gap-2 mb-3">
+          <Button onClick={generateResearchText} variant="outline">Generate Text List (for Grok)</Button>
+          <Button onClick={downloadResearchCSV} variant="outline">Download CSV</Button>
+        </div>
+        {researchText && (
+          <div className="mb-4">
+            <textarea
+              value={researchText}
+              readOnly
+              className="w-full h-64 font-mono text-xs p-3 border border-zinc-800 bg-zinc-950 rounded-xl"
+            />
+            <Button
+              size="sm"
+              variant="outline"
+              className="mt-2"
+              onClick={() => {
+                navigator.clipboard.writeText(researchText);
+                alert('Copied to clipboard!');
+              }}
+            >
+              Copy to Clipboard
+            </Button>
+          </div>
+        )}
+      </div>
+
       {loading ? (
         <div className="text-zinc-400">Loading report data...</div>
       ) : (
         <>
           {/* Out of Stock Report */}
           <div className="mb-10">
-            <h2 className="text-xl font-semibold mb-3 flex items-center gap-2"><AlertTriangle className="h-5 w-5 text-amber-400" /> Out of Stock Report (Parts &amp; Paints — 0 Available)</h2>
+            <div className="flex items-center justify-between mb-3">
+              <h2 className="text-xl font-semibold flex items-center gap-2"><AlertTriangle className="h-5 w-5 text-amber-400" /> Out of Stock Report (Parts &amp; Paints — 0 Available)</h2>
+              <Button variant="outline" size="sm" onClick={() => downloadCSV(outOfStock, 'out-of-stock.csv')} disabled={outOfStock.length === 0}>
+                CSV
+              </Button>
+            </div>
             {outOfStock.length === 0 ? (
               <div className="card p-6 text-emerald-400">No out of stock items. Your workbench is well supplied.</div>
             ) : (
@@ -182,7 +310,19 @@ export default function ReportsPage() {
 
           {/* Value Breakdowns */}
           <div className="mb-10">
-            <h2 className="text-xl font-semibold mb-3 flex items-center gap-2"><TrendingUp className="h-5 w-5" /> Value Breakdowns</h2>
+            <div className="flex items-center justify-between mb-3">
+              <h2 className="text-xl font-semibold flex items-center gap-2"><TrendingUp className="h-5 w-5" /> Value Breakdowns</h2>
+              <div className="flex gap-2">
+                <Button variant="outline" size="sm" onClick={() => {
+                  const locRows = Object.entries(valueByLocation).map(([loc, val]) => ({ location: loc, value: val }));
+                  downloadCSV(locRows, 'value-by-location.csv');
+                }}>Location CSV</Button>
+                <Button variant="outline" size="sm" onClick={() => {
+                  const mfrRows = Object.entries(valueByMfr).map(([mfr, val]) => ({ manufacturer: mfr, value: val }));
+                  downloadCSV(mfrRows, 'value-by-manufacturer.csv');
+                }}>Mfr CSV</Button>
+              </div>
+            </div>
             <div className="grid md:grid-cols-2 gap-6">
               <div className="card p-5">
                 <div className="text-sm text-zinc-400 mb-2">Total Current Portfolio Value</div>
@@ -218,7 +358,12 @@ export default function ReportsPage() {
 
           {/* Project Summaries */}
           <div>
-            <h2 className="text-xl font-semibold mb-3 flex items-center gap-2"><BarChart3 className="h-5 w-5" /> Project Value &amp; Status Summaries</h2>
+            <div className="flex items-center justify-between mb-3">
+              <h2 className="text-xl font-semibold flex items-center gap-2"><BarChart3 className="h-5 w-5" /> Project Value &amp; Status Summaries</h2>
+              <Button variant="outline" size="sm" onClick={() => downloadCSV(projectReports, 'projects-summary.csv')} disabled={projectReports.length === 0}>
+                CSV
+              </Button>
+            </div>
             {projectReports.length === 0 ? (
               <div className="text-sm text-zinc-400">No projects yet.</div>
             ) : (

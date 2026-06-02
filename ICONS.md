@@ -62,7 +62,7 @@ The app now supports PWA features (installable on your phone's home screen). For
 
 ## After Adding Icons
 - You now have the transparent 512 PNG for v2 (icon-512-racecar-v2.png) and apple-touch-icon.png.
-- Create icon-192-racecar-v2.png when ready for complete coverage (the manifest has the entry).
+- Create icon-192-racecar-v2.png when ready (then add the entry back to manifest.json and layout.tsx icon array for full sizes).
 - JPG fallbacks are still present (harmless).
 - Rebuild and redeploy: `npm run build` then push to GitHub (Vercel will pick it up)
 - Test on phone: Add to Home Screen and check the icon looks good (no weird cropping, transparent background for maskable)

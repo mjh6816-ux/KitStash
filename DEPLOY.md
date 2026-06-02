@@ -102,7 +102,7 @@ To update env vars later: Project → Settings → Environment Variables → Red
 
 - Add a real Supabase Auth login flow (we can implement this later).
 - Custom domain (Vercel makes it easy).
-- Make it a PWA so you can "install" it on your phone home screen.
+- PWA support is complete: custom race-car themed icons (transparent PNGs for maskable), apple-touch-icon, installable on phone home screen. See [ICONS.md](./ICONS.md).
 - Add more robust error boundaries or logging.
 
 ## Troubleshooting common issues

@@ -1511,6 +1511,23 @@ export default function InventoryClient({
         Aftermarket Parts, Kits, and Paints now use server-side infinite scroll (40 per load) with filters.
       </div>
 
+      {/* Mobile floating + Add button (FAB) for one-handed use */}
+      <div className="fixed bottom-20 right-4 z-[60] md:hidden">
+        <Button
+          size="lg"
+          className="h-14 w-14 rounded-full text-3xl shadow-xl active:scale-95"
+          onClick={() => {
+            setAddError(null);
+            // Fire and forget; don't let refresh throw block the modal
+            Promise.resolve().then(() => refreshLookups().catch(() => {})).catch(() => {});
+            setShowAddModal(true);
+          }}
+          aria-label="Add new item"
+        >
+          +
+        </Button>
+      </div>
+
       {/* Add / Edit Item Modal */}
       {showAddModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">

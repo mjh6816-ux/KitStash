@@ -98,6 +98,12 @@ Every time you `git push` to the main branch, Vercel will automatically rebuild 
 
 To update env vars later: Project → Settings → Environment Variables → Redeploy.
 
+## Security Notes
+
+See **[SECURITY.md](./SECURITY.md)** for the current state of the Supabase Security Advisor, RLS policies, and known items (including the one Pro-only warning that remains).
+
+The main runtime protection for the deployed app is Vercel Password Protection (Step 4 above) + Supabase RLS policies scoped to your single user.
+
 ## Optional next improvements (after it's working remotely)
 
 - Add a real Supabase Auth login flow (we can implement this later).

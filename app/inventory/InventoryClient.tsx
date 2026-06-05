@@ -4,9 +4,11 @@ import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { useRouter, usePathname } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { createClient } from "@/lib/supabase/client";
+import BarcodeScanner from "@/components/BarcodeScanner";
+
+/* eslint-disable @typescript-eslint/no-explicit-any -- dynamic Supabase joined rows + form state; types would be very large for all the optional joins */
 import {
   deletePart, deleteKit, deletePaint,
-  receiveStock, receivePaintStock,
   adjustPartStock, adjustPaintStock, adjustKitStock,
   addAftermarketPart, addKit, addPaint,
   updateAftermarketPart, updateKit, updatePaint,
@@ -14,45 +16,6 @@ import {
   createManufacturer, createScale, createPartType, createKitType, createPaintType, createPaintBrand, createLocation, createPurchaseSource,
   getAllParts, getAllKits, getAllPaints
 } from "./actions";
-
-const PAGE_SIZE = 40;
-
-type Part = {
-  id: string;
-  name: string;
-  quantity_owned: number;
-  location: string | null;
-  manufacturer?: { name: string } | null;
-  scale?: { name: string } | null;
-  part_type?: { name: string } | null;
-};
-
-type Kit = {
-  id: string;
-  name: string;
-  status: string;
-  location: string | null;
-  manufacturer?: { name: string } | null;
-  scale?: { name: string } | null;
-  kit_type?: { name: string } | null;
-};
-
-type Paint = {
-  id: string;
-  color_name: string;
-  brand: string | null; // legacy free-text
-  quantity_owned: number;
-  location: string | null;
-  opened: boolean;
-  paint_type?: { name: string } | null;
-  paint_brand?: { name: string } | null; // new lookup
-  // New color reference fields
-  series?: string | null;
-  fs_number?: string | null;
-  ral_number?: string | null;
-  rlm_number?: string | null;
-  ana_number?: string | null;
-};
 
 export default function InventoryClient({
   manufacturers,
@@ -81,6 +44,13 @@ export default function InventoryClient({
 }) {
   const [showAddModal, setShowAddModal] = useState(false);
   const [addType, setAddType] = useState<"part" | "kit" | "paint">("part");
+
+  // Barcode scanner state (used in kit forms and for quick lookup)
+  const [showBarcodeScanner, setShowBarcodeScanner] = useState(false);
+  const [barcodeScanTarget, setBarcodeScanTarget] = useState<"form" | "lookup">("form");
+
+  // Result from quick barcode lookup (for shop/convention "do I own this?" flow)
+  const [barcodeLookupResult, setBarcodeLookupResult] = useState<any>(null);
   const [addError, setAddError] = useState<string | null>(null);
   const [editingItem, setEditingItem] = useState<any>(null);
   const [formValues, setFormValues] = useState<any>(null);
@@ -135,21 +105,75 @@ export default function InventoryClient({
   const [pendingViewId, setPendingViewId] = useState<string | null>(null);
   const deepLinkHandledRef = useRef(false);
 
+  // Load allocations for an item (used by detail views). Defined early to avoid source-order/TDZ lint issues with effects that reference open* fns.
+  const loadItemProjectAllocations = async (itemType: 'kit' | 'part' | 'paint', itemId: string) => {
+    const { data, error } = await supabase
+      .from("project_allocations")
+      .select(`
+        id,
+        quantity,
+        allocated_at,
+        project:projects(id, name, status, conceived_date)
+      `)
+      .eq("item_id", itemId)
+      .eq("item_type", itemType)
+      .eq("allocation_status", "allocated")
+      .order("allocated_at", { ascending: false });
+
+    if (!error && data) {
+      setItemProjectAllocations(data);
+    } else {
+      setItemProjectAllocations([]);
+    }
+  };
+
+  // Open detail views (hoisted early for init effect + handler that close over them)
+  const openKitDetails = (kit: any) => {
+    setViewingKit(kit);
+    loadItemProjectAllocations('kit', kit.id);
+  };
+
+  const openPartDetails = (part: any) => {
+    setViewingPart(part);
+    loadItemProjectAllocations('part', part.id);
+  };
+
+  const openPaintDetails = (paint: any) => {
+    setViewingPaint(paint);
+    loadItemProjectAllocations('paint', paint.id);
+  };
+
+  // Close helpers
+  const closeKitDetails = () => {
+    setViewingKit(null);
+    setItemProjectAllocations([]);
+  };
+
+  const closePartDetails = () => {
+    setViewingPart(null);
+    setItemProjectAllocations([]);
+  };
+
+  const closePaintDetails = () => {
+    setViewingPaint(null);
+    setItemProjectAllocations([]);
+  };
+
   // For live duplicate checking during Add
   const [addName, setAddName] = useState("");
+  const [addBarcode, setAddBarcode] = useState("");
 
   // List density (global for now - very useful with 2500+ items)
-  const [density, setDensity] = useState<"normal" | "compact">("normal");
+  // Initialize compact on mobile during first client render to avoid setState-in-effect
+  const [density, setDensity] = useState<"normal" | "compact">(() => {
+    if (typeof window !== "undefined" && window.innerWidth < 768) {
+      return "compact";
+    }
+    return "normal";
+  });
 
   // Bump to force re-fetch on explicit header Refresh or window focus/visibility (cross-device sync)
   const [refreshKey, setRefreshKey] = useState(0);
-
-  // Auto compact on mobile for better one-handed use
-  useEffect(() => {
-    if (typeof window !== "undefined" && window.innerWidth < 768) {
-      setDensity("compact");
-    }
-  }, []);
 
   const MAX_IMAGE_SIZE = 5 * 1024 * 1024; // 5MB limit for now
 
@@ -157,130 +181,15 @@ export default function InventoryClient({
   const router = useRouter();
   const pathname = usePathname();
 
+  // Stable Supabase browser client for details loading (allocations etc.) - defined early so load/open fns can close over it without forward-ref issues
+  const supabase = useMemo(() => createClient(), []);
+
   // Start with safe server/client defaults. URL params are applied in the effect below (post-hydration).
   // This guarantees the first render output during hydration matches what the server produced.
   const [activeTab, setActiveTabState] = useState<"parts" | "kits" | "paints">("kits");
   const [sortOption, setSortOptionState] = useState<string>("name-asc");
 
-  // One-time (post-hydration): apply URL tab/sort if present, and seed the per-tab sort memory.
-  // Only mutate tabStates when the sort actually differs, to avoid an unnecessary re-render on default loads.
-  // Also handles deep-link "view" from Projects (auto-open details + ensure the item is visible by clearing filters).
-  useEffect(() => {
-    if (typeof window !== "undefined") {
-      const params = new URLSearchParams(window.location.search);
-      const tabFromUrl = params.get("tab") as "parts" | "kits" | "paints" | null;
-      const sortFromUrl = params.get("sort") || null;
-      const viewFromUrl = params.get("view");
-      const tab = tabFromUrl || "kits";
-      const sort = sortFromUrl || "name-asc";
-
-      if (tabFromUrl || sortFromUrl) {
-        setActiveTabState(tab as any);
-        setSortOptionState(sort);
-      } else if (viewFromUrl) {
-        // Arrived with only ?view= (no explicit tab) — still switch to a sensible default for the item
-        // (the handler effect will also force the precise tab once it finds the item)
-        setActiveTabState(tab as any);
-      }
-      setTabStates(prev => {
-        let next = prev;
-        // apply sort
-        if (prev[tab]?.sortOption !== sort) {
-          next = {
-            ...next,
-            [tab]: { ...next[tab], sortOption: sort }
-          };
-        }
-        // If arriving via deep link from a project "View", clear filters on the target tab
-        // so the item is guaranteed to appear in the list (user expectation from "View" action).
-        if (viewFromUrl) {
-          next = {
-            ...next,
-            [tab]: {
-              ...next[tab],
-              searchTerm: "",
-              filterManufacturer: "",
-              filterScale: "",
-              filterPartType: "",
-              filterPaintType: "",
-              filterStockStatus: "",
-              filterLocation: "",
-            }
-          };
-        }
-        return next;
-      });
-
-      if (viewFromUrl) {
-        setPendingViewId(viewFromUrl);
-
-        // Primary open attempt: do it here inside the init effect.
-        // At this point the effect body runs with closure over the mount render's values:
-        // - the `kits`/`parts`/`paints` from useState(initial* from server props) -- full data is here
-        // - the open* functions from this render
-        // We trust the `tab` we computed from the URL (which is why the tab UI updates correctly).
-        // Search the corresponding list (and fallback) using this data, then open + force tab/filters + clean URL.
-        let match: any = null;
-        let opener: ((item: any) => void) | null = null;
-        const id = viewFromUrl;
-        if (tab === "kits") {
-          match = kits.find((k: any) => k.id === id);
-          if (match) opener = openKitDetails;
-        } else if (tab === "parts") {
-          match = parts.find((p: any) => p.id === id);
-          if (match) opener = openPartDetails;
-        } else if (tab === "paints") {
-          match = paints.find((p: any) => p.id === id);
-          if (match) opener = openPaintDetails;
-        }
-        if (!match) {
-          // fallback search other lists just in case
-          match = kits.find((k: any) => k.id === id);
-          if (match) opener = openKitDetails;
-          if (!match) {
-            match = parts.find((p: any) => p.id === id);
-            if (match) opener = openPartDetails;
-          }
-          if (!match) {
-            match = paints.find((p: any) => p.id === id);
-            if (match) opener = openPaintDetails;
-          }
-        }
-        if (match && opener) {
-          deepLinkHandledRef.current = true;
-          // force the tab (in case) and ensure filters cleared for it
-          setActiveTabState(tab as "kits" | "parts" | "paints");
-          setTabStates(prev => ({
-            ...prev,
-            [tab]: {
-              ...prev[tab],
-              searchTerm: "",
-              filterManufacturer: "",
-              filterScale: "",
-              filterPartType: "",
-              filterPaintType: "",
-              filterStockStatus: "",
-              filterLocation: "",
-            }
-          }));
-          opener(match);
-          try {
-            const p = new URLSearchParams(window.location.search);
-            p.delete("view");
-            p.set("tab", tab);
-            const qs = p.toString();
-            router.replace(`${pathname}${qs ? "?" + qs : ""}`, { scroll: false });
-          } catch (e) {
-            console.error("Deep link replace error", e);
-          }
-          setPendingViewId(null);
-        }
-      }
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  // Per-tab filter + sort state (so each tab remembers its own settings)
+  // Per-tab filter + sort state (hoisted before init effect that closes over setTabStates + derived currents)
   type TabState = {
     searchTerm: string;
     filterManufacturer: string;
@@ -309,10 +218,7 @@ export default function InventoryClient({
     paints: { ...defaultTabState },
   });
 
-  // Note: activeTab and sortOption are now local state (no useSearchParams) for reliable deep links and cross-device behavior.
-  // We keep tabStates in sync for per-tab memory of filters. Changes update the URL via the setters.
-
-  // Current tab's values (derived from per-tab state)
+  // Current tab's values (derived from per-tab state) - also hoisted
   const current = tabStates[activeTab] || defaultTabState;
   const searchTerm = current.searchTerm;
   const filterManufacturer = current.filterManufacturer;
@@ -321,6 +227,136 @@ export default function InventoryClient({
   const filterPaintType = current.filterPaintType;
   const filterStockStatus = current.filterStockStatus;
   const filterLocation = current.filterLocation;
+
+  // One-time (post-hydration): apply URL tab/sort if present, and seed the per-tab sort memory.
+  // Only mutate tabStates when the sort actually differs, to avoid an unnecessary re-render on default loads.
+  // Also handles deep-link "view" from Projects (auto-open details + ensure the item is visible by clearing filters).
+  // Defer sets with 0 timeout to avoid "setState sync in effect" warnings/cascades during hydration+deep-link.
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      const params = new URLSearchParams(window.location.search);
+      const tabFromUrl = params.get("tab") as "parts" | "kits" | "paints" | null;
+      const sortFromUrl = params.get("sort") || null;
+      const viewFromUrl = params.get("view");
+      const tab = tabFromUrl || "kits";
+      const sort = sortFromUrl || "name-asc";
+
+      const applyInitial = () => {
+        if (tabFromUrl || sortFromUrl) {
+          setActiveTabState(tab as any);
+          setSortOptionState(sort);
+        } else if (viewFromUrl) {
+          // Arrived with only ?view= (no explicit tab) — still switch to a sensible default for the item
+          // (the handler effect will also force the precise tab once it finds the item)
+          setActiveTabState(tab as any);
+        }
+        setTabStates(prev => {
+          let next = prev;
+          // apply sort
+          if (prev[tab]?.sortOption !== sort) {
+            next = {
+              ...next,
+              [tab]: { ...next[tab], sortOption: sort }
+            };
+          }
+          // If arriving via deep link from a project "View", clear filters on the target tab
+          // so the item is guaranteed to appear in the list (user expectation from "View" action).
+          if (viewFromUrl) {
+            next = {
+              ...next,
+              [tab]: {
+                ...next[tab],
+                searchTerm: "",
+                filterManufacturer: "",
+                filterScale: "",
+                filterPartType: "",
+                filterPaintType: "",
+                filterStockStatus: "",
+                filterLocation: "",
+              }
+            };
+          }
+          return next;
+        });
+
+        if (viewFromUrl) {
+          setPendingViewId(viewFromUrl);
+
+          // Primary open attempt: do it here inside the init effect.
+          // At this point the effect body runs with closure over the mount render's values:
+          // - the `kits`/`parts`/`paints` from useState(initial* from server props) -- full data is here
+          // - the open* functions from this render
+          // We trust the `tab` we computed from the URL (which is why the tab UI updates correctly).
+          // Search the corresponding list (and fallback) using this data, then open + force tab/filters + clean URL.
+          let match: any = null;
+          let opener: ((item: any) => void) | null = null;
+          const id = viewFromUrl;
+          // Use the *initial* server props for the primary open (this effect runs on the mount render where state===initial)
+          // Avoids source-order reference issues for the live state vars declared later in the component.
+          if (tab === "kits") {
+            match = (initialKits as any[]).find((k: any) => k.id === id);
+            if (match) opener = openKitDetails;
+          } else if (tab === "parts") {
+            match = (initialParts as any[]).find((p: any) => p.id === id);
+            if (match) opener = openPartDetails;
+          } else if (tab === "paints") {
+            match = (initialPaints as any[]).find((p: any) => p.id === id);
+            if (match) opener = openPaintDetails;
+          }
+          if (!match) {
+            // fallback search other lists just in case (still using initials here for primary)
+            match = (initialKits as any[]).find((k: any) => k.id === id);
+            if (match) opener = openKitDetails;
+            if (!match) {
+              match = (initialParts as any[]).find((p: any) => p.id === id);
+              if (match) opener = openPartDetails;
+            }
+            if (!match) {
+              match = (initialPaints as any[]).find((p: any) => p.id === id);
+              if (match) opener = openPaintDetails;
+            }
+          }
+          if (match && opener) {
+            deepLinkHandledRef.current = true;
+            // force the tab (in case) and ensure filters cleared for it
+            setActiveTabState(tab as "kits" | "parts" | "paints");
+            setTabStates(prev => ({
+              ...prev,
+              [tab]: {
+                ...prev[tab],
+                searchTerm: "",
+                filterManufacturer: "",
+                filterScale: "",
+                filterPartType: "",
+                filterPaintType: "",
+                filterStockStatus: "",
+                filterLocation: "",
+              }
+            }));
+            opener(match);
+            try {
+              const p = new URLSearchParams(window.location.search);
+              p.delete("view");
+              p.set("tab", tab);
+              const qs = p.toString();
+              router.replace(`${pathname}${qs ? "?" + qs : ""}`, { scroll: false });
+            } catch (e) {
+              console.error("Deep link replace error", e);
+            }
+            setPendingViewId(null);
+          }
+        }
+      };
+
+      // Defer to avoid sync setState in effect lint/dev warnings
+      setTimeout(applyInitial, 0);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // tabStates + derived current/* are hoisted early (before init effect + any closures over setTabStates).
+  // Note: activeTab and sortOption are now local state (no useSearchParams) for reliable deep links and cross-device behavior.
+  // We keep tabStates in sync for per-tab memory of filters. Changes update the URL via the setters.
   // sortOption is the state variable (we keep it in sync with tabStates[activeTab] and URL)
 
   // Lookups (start with server props, become refreshable on client)
@@ -490,10 +526,7 @@ export default function InventoryClient({
   const [kitsError, setKitsError] = useState<string | null>(null);
   const [paintsError, setPaintsError] = useState<string | null>(null);
 
-  // Stable Supabase browser client for details loading (allocations etc.)
-  const supabase = useMemo(() => createClient(), []);
-
-  const fetchParts = useCallback(async (reset = false) => {
+  const fetchParts = useCallback(async () => {
     setPartsLoading(true);
     setPartsError(null);
     try {
@@ -509,7 +542,7 @@ export default function InventoryClient({
   }, []);
 
 
-  const fetchKits = useCallback(async (reset = false) => {
+  const fetchKits = useCallback(async () => {
     setKitsLoading(true);
     setKitsError(null);
     try {
@@ -525,7 +558,7 @@ export default function InventoryClient({
   }, []);
 
 
-  const fetchPaints = useCallback(async (reset = false) => {
+  const fetchPaints = useCallback(async () => {
     setPaintsLoading(true);
     setPaintsError(null);
     try {
@@ -544,16 +577,18 @@ export default function InventoryClient({
   // Load/refresh full data for all tabs on mount + when refreshKey is bumped (header Refresh or focus/visibility for cross-device sync).
   // We deliberately do NOT re-fetch on filter/search/sort changes — displayed* compute those instantly client-side.
   useEffect(() => {
-    fetchParts(true);
-    fetchKits(true);
-    fetchPaints(true);
+    fetchParts();
+    fetchKits();
+    fetchPaints();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTab, refreshKey]);
 
   // Extra explicit mount-only load (ensures data even if timing differs across devices/browsers)
   useEffect(() => {
-    fetchParts(true);
-    fetchKits(true);
-    fetchPaints(true);
+    fetchParts();
+    fetchKits();
+    fetchPaints();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Auto re-fetch when the window/tab regains focus or visibility.
@@ -571,6 +606,55 @@ export default function InventoryClient({
       document.removeEventListener('visibilitychange', onVis);
     };
   }, [activeTab]);
+
+  // Listen for barcode lookup trigger (from GlobalSearch "Scan" button or future nav items)
+  // Opens the scanner directly in lookup mode for the shop/convention "do I own this?" flow.
+  useEffect(() => {
+    const handler = () => {
+      setBarcodeScanTarget("lookup");
+      setShowBarcodeScanner(true);
+    };
+    window.addEventListener("trigger-barcode-lookup", handler);
+    return () => window.removeEventListener("trigger-barcode-lookup", handler);
+  }, []);
+
+  // Barcode handlers
+  const handleBarcodeDetectedForForm = (code: string) => {
+    if (editingItem) {
+      setFormValues((prev: any) => ({ ...prev, barcode: code }));
+    } else {
+      setAddBarcode(code);
+    }
+    setShowBarcodeScanner(false);
+    setBarcodeScanTarget("form");
+  };
+
+  const handleBarcodeDetectedForLookup = (code: string) => {
+    setShowBarcodeScanner(false);
+    setBarcodeScanTarget("lookup");
+
+    // Direct fast lookup against currently loaded kits (no extra network for the check)
+    const match = kits.find((k: any) => (k.barcode || "").toLowerCase() === code.toLowerCase());
+
+    if (match) {
+      const owned = (match.quantity_owned || 0) - (match.quantity_allocated || 0) - (match.quantity_used || 0);
+      setBarcodeLookupResult({
+        ...match,
+        scannedCode: code,
+        available: Math.max(0, owned),
+        owned: true,
+      });
+    } else {
+      setBarcodeLookupResult({
+        scannedCode: code,
+        owned: false,
+        notFound: true,
+      });
+    }
+
+    // Also push to GlobalSearch for full results / "View"
+    window.dispatchEvent(new CustomEvent("open-kitstash-search", { detail: { barcode: code } }));
+  };
 
   // Smart add/edit handler with optional image upload
   const handleAdd = async (fd: FormData) => {
@@ -609,21 +693,21 @@ export default function InventoryClient({
         } else {
           await addAftermarketPart(fd);
         }
-        await fetchParts(true);
+        await fetchParts();
       } else if (type === "kit") {
         if (isEditing) {
           await updateKit(fd);
         } else {
           await addKit(fd);
         }
-        await fetchKits(true);
+        await fetchKits();
       } else if (type === "paint") {
         if (isEditing) {
           await updatePaint(fd);
         } else {
           await addPaint(fd);
         }
-        await fetchPaints(true);
+        await fetchPaints();
       }
 
       setShowAddModal(false);
@@ -632,6 +716,7 @@ export default function InventoryClient({
       setSelectedImage(null);
       setCurrentImageUrl(null);
       setAddName("");
+      setAddBarcode("");
     } catch (err: any) {
       const msg = err?.message || "Failed to save. Check your terminal (next dev) for the exact error.";
       setAddError(msg);
@@ -656,13 +741,13 @@ export default function InventoryClient({
 
       if (type === "part") {
         await deletePart(formData);
-        await fetchParts(true);
+        await fetchParts();
       } else if (type === "kit") {
         await deleteKit(formData);
-        await fetchKits(true);
+        await fetchKits();
       } else if (type === "paint") {
         await deletePaint(formData);
-        await fetchPaints(true);
+        await fetchPaints();
       }
     } catch (err: any) {
       console.error("Delete failed:", err);
@@ -676,60 +761,6 @@ export default function InventoryClient({
   const openStockAdjust = (id: string, type: "part" | "paint" | "kit", name: string, current: number) => {
     setStockAdjust({ id, type, name, current });
     setStockAdjustAmount(1); // default to +1 for quick use
-  };
-
-  // Generic loader for project allocations (works for kit / part / paint)
-  const loadItemProjectAllocations = async (itemType: 'kit' | 'part' | 'paint', itemId: string) => {
-    const { data, error } = await supabase
-      .from("project_allocations")
-      .select(`
-        id,
-        quantity,
-        allocated_at,
-        project:projects(id, name, status, conceived_date)
-      `)
-      .eq("item_id", itemId)
-      .eq("item_type", itemType)
-      .eq("allocation_status", "allocated")
-      .order("allocated_at", { ascending: false });
-
-    if (!error && data) {
-      setItemProjectAllocations(data);
-    } else {
-      setItemProjectAllocations([]);
-    }
-  };
-
-  // Open detail views
-  const openKitDetails = (kit: any) => {
-    setViewingKit(kit);
-    loadItemProjectAllocations('kit', kit.id);
-  };
-
-  const openPartDetails = (part: any) => {
-    setViewingPart(part);
-    loadItemProjectAllocations('part', part.id);
-  };
-
-  const openPaintDetails = (paint: any) => {
-    setViewingPaint(paint);
-    loadItemProjectAllocations('paint', paint.id);
-  };
-
-  // Close helpers
-  const closeKitDetails = () => {
-    setViewingKit(null);
-    setItemProjectAllocations([]);
-  };
-
-  const closePartDetails = () => {
-    setViewingPart(null);
-    setItemProjectAllocations([]);
-  };
-
-  const closePaintDetails = () => {
-    setViewingPaint(null);
-    setItemProjectAllocations([]);
   };
 
   // Deep link handler (from Projects "View" buttons or direct /inventory?tab=...&view=<itemId>)
@@ -772,44 +803,48 @@ export default function InventoryClient({
     }
 
     if (match && opener) {
-      // Ensure we are showing the correct tab (in case timing made activeTab lag the url intent)
-      if (foundTab && activeTab !== foundTab) {
-        setActiveTabState(foundTab);
-      }
+      // Defer sets to avoid "setState sync in effect" detector (data-arrival handler)
+      setTimeout(() => {
+        // Ensure we are showing the correct tab (in case timing made activeTab lag the url intent)
+        if (foundTab && activeTab !== foundTab) {
+          setActiveTabState(foundTab);
+        }
 
-      // Make sure filters on the target tab are cleared so the item appears in the list (not just in the modal)
-      if (foundTab) {
-        setTabStates(prev => ({
-          ...prev,
-          [foundTab]: {
-            ...prev[foundTab],
-            searchTerm: "",
-            filterManufacturer: "",
-            filterScale: "",
-            filterPartType: "",
-            filterPaintType: "",
-            filterStockStatus: "",
-            filterLocation: "",
-          }
-        }));
-      }
+        // Make sure filters on the target tab are cleared so the item appears in the list (not just in the modal)
+        if (foundTab) {
+          setTabStates(prev => ({
+            ...prev,
+            [foundTab]: {
+              ...prev[foundTab],
+              searchTerm: "",
+              filterManufacturer: "",
+              filterScale: "",
+              filterPartType: "",
+              filterPaintType: "",
+              filterStockStatus: "",
+              filterLocation: "",
+            }
+          }));
+        }
 
-      deepLinkHandledRef.current = true;
-      opener(match);
+        deepLinkHandledRef.current = true;
+        opener(match);
 
-      // Clean the view param from URL (keep tab so deep links remain bookmarkable for the tab)
-      try {
-        const params = new URLSearchParams(window.location.search);
-        params.delete("view");
-        if (foundTab) params.set("tab", foundTab);
-        const qs = params.toString();
-        router.replace(`${pathname}${qs ? "?" + qs : ""}`, { scroll: false });
-      } catch (e) {
-        console.error("Deep link replace error (handler)", e);
-      }
-      setPendingViewId(null);
+        // Clean the view param from URL (keep tab so deep links remain bookmarkable for the tab)
+        try {
+          const params = new URLSearchParams(window.location.search);
+          params.delete("view");
+          if (foundTab) params.set("tab", foundTab);
+          const qs = params.toString();
+          router.replace(`${pathname}${qs ? "?" + qs : ""}`, { scroll: false });
+        } catch (e) {
+          console.error("Deep link replace error (handler)", e);
+        }
+        setPendingViewId(null);
+      }, 0);
     }
     // Re-run when pending changes, tab changes, or any of the lists get new data (new array ref from set)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pendingViewId, activeTab, kits, parts, paints, router, pathname]);
 
   // Perform the stock adjustment
@@ -837,13 +872,13 @@ export default function InventoryClient({
 
       if (type === "part") {
         await adjustPartStock(formData);
-        await fetchParts(true);
+        await fetchParts();
       } else if (type === "paint") {
         await adjustPaintStock(formData);
-        await fetchPaints(true);
+        await fetchPaints();
       } else if (type === "kit") {
         await adjustKitStock(formData);
-        await fetchKits(true);
+        await fetchKits();
       }
     } catch (err: any) {
       console.error("Stock adjustment failed:", err);
@@ -1012,12 +1047,84 @@ export default function InventoryClient({
           <Button
             variant="outline"
             size="sm"
+            onClick={() => {
+              setBarcodeScanTarget("lookup");
+              setShowBarcodeScanner(true);
+            }}
+          >
+            📷 Scan to Lookup Kit
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
             onClick={() => setRefreshKey(k => k + 1)}
           >
             ↻ Refresh
           </Button>
         </div>
       </div>
+
+      {/* Quick Barcode Lookup Result (for shop/convention "do I already own this kit?" scans) */}
+      {barcodeLookupResult && (
+        <div className="mb-6 rounded-2xl border border-amber-500/30 bg-zinc-950 p-4">
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <div className="text-[10px] uppercase tracking-widest text-amber-400/80">Barcode Lookup</div>
+              <div className="font-mono text-sm text-amber-300 mt-0.5">{barcodeLookupResult.scannedCode}</div>
+
+              {barcodeLookupResult.owned ? (
+                <div className="mt-2">
+                  <div className="text-emerald-400 font-semibold">You own this kit</div>
+                  <div className="text-sm mt-1">
+                    {barcodeLookupResult.name} • {barcodeLookupResult.scale?.name} • {barcodeLookupResult.manufacturer?.name}
+                  </div>
+                  <div className="text-xs text-zinc-400 mt-1">
+                    Owned: {barcodeLookupResult.quantity_owned} • Available: {barcodeLookupResult.available ?? 0} • Status: {barcodeLookupResult.status}
+                    {barcodeLookupResult.loc?.name && ` • ${barcodeLookupResult.loc.name}`}
+                  </div>
+                </div>
+              ) : (
+                <div className="mt-2 text-amber-400 font-medium">Not in your stash</div>
+              )}
+            </div>
+
+            <div className="flex flex-col gap-2 items-end">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setBarcodeLookupResult(null)}
+              >
+                Dismiss
+              </Button>
+              {barcodeLookupResult.owned && barcodeLookupResult.id && (
+                <Button
+                  size="sm"
+                  onClick={() => {
+                    // Jump to inventory detail
+                    window.location.href = `/inventory?tab=kits&view=${barcodeLookupResult.id}`;
+                  }}
+                >
+                  View Details
+                </Button>
+              )}
+              {barcodeLookupResult.notFound && (
+                <Button
+                  size="sm"
+                  onClick={() => {
+                    setAddType("kit");
+                    setAddBarcode(barcodeLookupResult.scannedCode);
+                    setFormValues({ barcode: barcodeLookupResult.scannedCode });
+                    setShowAddModal(true);
+                    setBarcodeLookupResult(null);
+                  }}
+                >
+                  Add This Kit
+                </Button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Tabs */}
       <div className="flex border-b border-zinc-800 mb-6">
@@ -1301,6 +1408,7 @@ export default function InventoryClient({
                     <div className={`font-medium ${density === "compact" ? "text-base" : "text-lg"}`}>{kit.name}</div>
                     <div className="text-xs text-zinc-400 mt-0.5">
                       {[typ?.name, scl?.name, mfg?.name].filter(Boolean).join(" • ")}
+                      {kit.barcode && <span className="ml-2 font-mono text-[10px] text-amber-400/70">{kit.barcode}</span>}
                     </div>
                     {kit.loc?.name && <div className="text-[10px] text-zinc-500 mt-0.5">Location: {kit.loc.name}</div>}
                     {kit.notes && density === "normal" && (
@@ -1508,8 +1616,50 @@ export default function InventoryClient({
       )}
 
       <div className="mt-10 text-xs text-amber-400 border-t border-zinc-800 pt-4">
-        Aftermarket Parts, Kits, and Paints now use server-side infinite scroll (40 per load) with filters.
+        Full inventory loads via server actions (service role) + client filters + focus/refresh sync. Density toggle for large collections.
       </div>
+
+      {/* Barcode Scanner Overlay (used for both form population and quick kit lookup) */}
+      {showBarcodeScanner && (
+        <div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/80 p-4">
+          <div className="bg-zinc-900 rounded-2xl p-5 w-full max-w-md border border-zinc-700">
+            <div className="flex items-center justify-between mb-3">
+              <div>
+                <div className="font-semibold">Scan Barcode</div>
+                <div className="text-xs text-zinc-500">Point at the kit box barcode</div>
+              </div>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  setShowBarcodeScanner(false);
+                  setBarcodeScanTarget("form");
+                }}
+              >
+                Cancel
+              </Button>
+            </div>
+
+            <BarcodeScanner
+              onDetected={(code) => {
+                if (barcodeScanTarget === "form") {
+                  handleBarcodeDetectedForForm(code);
+                } else {
+                  handleBarcodeDetectedForLookup(code);
+                }
+              }}
+              onError={(err) => {
+                console.warn("Scanner error:", err);
+              }}
+              stopOnFirstDetection={true}
+            />
+
+            <div className="mt-3 text-[10px] text-center text-zinc-500">
+              Works on phone camera. Tap outside or Cancel to close.
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Mobile floating + Add button (FAB) for one-handed use */}
       <div className="fixed bottom-20 right-4 z-[60] md:hidden">
@@ -1543,6 +1693,7 @@ export default function InventoryClient({
                 setAddType(newType);
                 setAddError(null);
                 setAddName("");
+                setAddBarcode("");
                 if (editingItem) {
                   // Switching type while editing → exit edit mode
                   setEditingItem(null);
@@ -1827,7 +1978,7 @@ export default function InventoryClient({
                   </>
                 )}
                 <div className="flex gap-2 pt-2">
-                  <Button type="button" variant="outline" onClick={() => { setAddError(null); setShowAddModal(false); setEditingItem(null); setFormValues(null); }} className="flex-1">Cancel</Button>
+                  <Button type="button" variant="outline" onClick={() => { setAddError(null); setShowAddModal(false); setEditingItem(null); setFormValues(null); setAddBarcode(""); }} className="flex-1">Cancel</Button>
                   <Button type="submit" className="flex-1">{editingItem ? "Save Changes" : "Add Part"}</Button>
                 </div>
               </form>
@@ -1916,6 +2067,31 @@ export default function InventoryClient({
                       onChange={(e) => setFormValues((prev: any) => ({ ...prev, name: e.target.value }))}
                       className="w-full rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm"
                     />
+
+                    {/* Barcode with scan button (especially useful for kits) */}
+                    <div className="flex gap-2 items-center">
+                      <input
+                        type="text"
+                        name="barcode"
+                        placeholder="Barcode (UPC/EAN) — great for lookups"
+                        value={formValues?.barcode ?? ""}
+                        onChange={(e) => setFormValues((prev: any) => ({ ...prev, barcode: e.target.value }))}
+                        className="flex-1 rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm"
+                      />
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={() => {
+                          setBarcodeScanTarget("form");
+                          setShowBarcodeScanner(true);
+                        }}
+                        className="whitespace-nowrap px-3"
+                      >
+                        📷 Scan
+                      </Button>
+                    </div>
+
                     <div className="grid grid-cols-2 gap-3">
                       <select
                         name="manufacturerId"
@@ -2003,6 +2179,31 @@ export default function InventoryClient({
                       onChange={(e) => setAddName(e.target.value)}
                       className="w-full rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm" 
                     />
+
+                    {/* Barcode for new kit add */}
+                    <div className="flex gap-2">
+                      <input
+                        type="text"
+                        name="barcode"
+                        placeholder="Barcode (UPC/EAN)"
+                        value={addBarcode}
+                        onChange={(e) => setAddBarcode(e.target.value)}
+                        className="flex-1 rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm"
+                      />
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={() => {
+                          setBarcodeScanTarget("form");
+                          setShowBarcodeScanner(true);
+                        }}
+                        className="whitespace-nowrap"
+                      >
+                        Scan
+                      </Button>
+                    </div>
+
                     {addName.length > 3 && addType === "kit" && (() => {
                       const dups = findPotentialDuplicates(addName, undefined, undefined, "kit");
                       return dups.length > 0 ? (
@@ -2074,7 +2275,7 @@ export default function InventoryClient({
                   rows={2}
                 />
                 <div className="flex gap-2 pt-2">
-                  <Button type="button" variant="outline" onClick={() => { setAddError(null); setShowAddModal(false); setEditingItem(null); setFormValues(null); }} className="flex-1">Cancel</Button>
+                  <Button type="button" variant="outline" onClick={() => { setAddError(null); setShowAddModal(false); setEditingItem(null); setFormValues(null); setAddBarcode(""); }} className="flex-1">Cancel</Button>
                   <Button type="submit" className="flex-1">{editingItem ? "Save Changes" : "Add Kit"}</Button>
                 </div>
               </form>
@@ -2258,7 +2459,7 @@ export default function InventoryClient({
                 </label>
 
                 <div className="flex gap-2 pt-2">
-                  <Button type="button" variant="outline" onClick={() => { setAddError(null); setShowAddModal(false); setEditingItem(null); setFormValues(null); }} className="flex-1">Cancel</Button>
+                  <Button type="button" variant="outline" onClick={() => { setAddError(null); setShowAddModal(false); setEditingItem(null); setFormValues(null); setAddBarcode(""); }} className="flex-1">Cancel</Button>
                   <Button type="submit" className="flex-1">{editingItem ? "Save Changes" : "Add Paint"}</Button>
                 </div>
               </form>
@@ -2487,6 +2688,9 @@ export default function InventoryClient({
                   {[viewingKit.kit_type?.name, viewingKit.scale?.name, viewingKit.manufacturer?.name]
                     .filter(Boolean)
                     .join(" • ")}
+                  {viewingKit.barcode && (
+                    <span className="ml-3 font-mono text-amber-400/80">{viewingKit.barcode}</span>
+                  )}
                 </div>
               </div>
               <Button

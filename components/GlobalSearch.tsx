@@ -4,6 +4,9 @@ import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { getAllParts, getAllKits, getAllPaints } from "@/app/inventory/actions";
 import { Search, X, Package, Wrench, Droplet } from "lucide-react";
+import BarcodeScanner from "@/components/BarcodeScanner";
+
+/* eslint-disable @typescript-eslint/no-explicit-any -- search results from inventory fetches */
 
 /**
  * GlobalSearch
@@ -23,14 +26,24 @@ export default function GlobalSearch() {
   const [kits, setKits] = useState<any[]>([]);
   const [paints, setPaints] = useState<any[]>([]);
 
+  // Internal barcode scanning mode for quick kit lookup (works from any page)
+  const [isScanningBarcode, setIsScanningBarcode] = useState(false);
+
   // Listen for global open event (dispatched from layout nav buttons)
+  // Also supports { detail: { barcode: "..." } } from scanner for quick kit lookup
   useEffect(() => {
-    const handler = () => {
+    const handler = (e: Event) => {
+      const custom = e as CustomEvent;
       setOpen(true);
-      setQuery("");
+      if (custom.detail?.barcode) {
+        // Barcode lookup mode: immediately search by the exact barcode
+        setQuery(custom.detail.barcode);
+      } else {
+        setQuery("");
+      }
     };
-    window.addEventListener("open-kitstash-search", handler);
-    return () => window.removeEventListener("open-kitstash-search", handler);
+    window.addEventListener("open-kitstash-search", handler as EventListener);
+    return () => window.removeEventListener("open-kitstash-search", handler as EventListener);
   }, []);
 
   // Close on Escape
@@ -84,13 +97,31 @@ export default function GlobalSearch() {
 
   const filteredKits = useMemo(() => {
     if (!q) return kits.slice(0, 8);
-    return kits.filter((k: any) => {
+    const matches = kits.filter((k: any) => {
       const name = (k.name || "").toLowerCase();
       const notes = (k.notes || "").toLowerCase();
       const mfr = (k.manufacturer?.name || "").toLowerCase();
       const scale = (k.scale?.name || "").toLowerCase();
-      return name.includes(q) || notes.includes(q) || mfr.includes(q) || scale.includes(q);
-    }).slice(0, 8);
+      const barcode = (k.barcode || "").toLowerCase();
+      return (
+        name.includes(q) ||
+        notes.includes(q) ||
+        mfr.includes(q) ||
+        scale.includes(q) ||
+        barcode.includes(q)
+      );
+    });
+
+    // Prioritize exact barcode matches for the "quick shop lookup" use case
+    matches.sort((a: any, b: any) => {
+      const aExact = (a.barcode || "").toLowerCase() === q;
+      const bExact = (b.barcode || "").toLowerCase() === q;
+      if (aExact && !bExact) return -1;
+      if (!aExact && bExact) return 1;
+      return 0;
+    });
+
+    return matches.slice(0, 8);
   }, [kits, q]);
 
   const filteredParts = useMemo(() => {
@@ -153,10 +184,36 @@ export default function GlobalSearch() {
             placeholder="Search kits, parts, paints (name, notes, brand, designed-for kit...)"
             className="flex-1 bg-transparent text-lg placeholder:text-zinc-500 focus:outline-none"
           />
+          <button
+            onClick={() => {
+              setIsScanningBarcode(true);
+            }}
+            className="text-xs px-2.5 py-1 rounded border border-zinc-700 hover:border-amber-500/60 flex items-center gap-1"
+            title="Scan barcode to quickly check if you own this kit"
+          >
+            📷 Scan
+          </button>
           <button onClick={close} className="text-zinc-400 hover:text-white p-1">
             <X className="h-5 w-5" />
           </button>
         </div>
+
+        {/* Barcode scanning UI (quick stock lookup mode) */}
+        {isScanningBarcode && (
+          <div className="p-4 border-b border-zinc-800">
+            <div className="flex justify-between items-center mb-2">
+              <div className="text-sm font-medium">Scanning for kit barcode</div>
+              <button onClick={() => setIsScanningBarcode(false)} className="text-xs text-zinc-400 hover:text-white">Cancel</button>
+            </div>
+            <BarcodeScanner
+              onDetected={(code) => {
+                setQuery(code);
+                setIsScanningBarcode(false);
+              }}
+              stopOnFirstDetection={true}
+            />
+          </div>
+        )}
 
         {/* Results */}
         <div className="max-h-[60vh] overflow-y-auto p-2 text-sm">
@@ -167,6 +224,11 @@ export default function GlobalSearch() {
           {!loading && q && totalMatches === 0 && (
             <div className="p-6 text-center text-zinc-400">
               No matches for “{q}”. Try a different term.
+              {q.replace(/\s/g, "").length > 6 && (
+                <div className="mt-2 text-[11px] text-amber-400/80">
+                  Looks like a barcode — nothing with this code in your stash.
+                </div>
+              )}
             </div>
           )}
 
@@ -192,6 +254,7 @@ export default function GlobalSearch() {
                         <div className="font-medium truncate">{k.name}</div>
                         <div className="text-[11px] text-zinc-400 truncate">
                           {[k.manufacturer?.name, k.scale?.name, k.kit_type?.name].filter(Boolean).join(" • ")}
+                          {k.barcode && <span className="ml-2 font-mono text-[10px] text-amber-400/70">{k.barcode}</span>}
                         </div>
                       </div>
                       <div className="text-right text-xs tabular-nums text-emerald-400">

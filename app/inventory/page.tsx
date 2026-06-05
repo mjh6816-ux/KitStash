@@ -2,6 +2,8 @@ import { createClient } from "@/lib/supabase/server";
 import { createClient as createServiceClient } from "@supabase/supabase-js";
 import InventoryClient from "./InventoryClient";
 
+/* eslint-disable @typescript-eslint/no-explicit-any -- fallback mappers and service fetches for schema-evolution resilience */
+
 // Centralized single-user ID (same as in actions.ts)
 const USER_ID =
   process.env.SUPABASE_USER_ID || "a8e4287a-040b-41dd-ba45-87f6a3c07395";
@@ -53,7 +55,7 @@ export default async function InventoryPage() {
     if (res.error) {
       console.warn(`safeFetch(${table}): rich select failed, falling back to core columns (run the add-*.sql migrations if you want the new flags/associations).`, res.error);
       // Strip the optional pieces from whatever select string was passed in.
-      let core = baseSelect
+      const core = baseSelect
         .replace(/,?\s*exclude_from_out_of_stock/g, "")
         .replace(/,?\s*designed_for_kit_id/g, "")
         .replace(/,?\s*designed_for_kit:kits\(id,\s*name\)/g, "");
@@ -84,7 +86,7 @@ export default async function InventoryPage() {
     ),
     serviceSupabase
       .from("kits")
-      .select(`id, name, status, notes, box_art_url, quantity_owned, quantity_allocated, quantity_used, location_id, price_paid, purchase_date, purchase_source_id, current_value, value_last_updated, created_at, updated_at, manufacturer_id, scale_id, kit_type_id, manufacturer:manufacturers(name), scale:scales(name, sort_order), kit_type:kit_types(name), loc:locations(name), purchase_source:purchase_sources(name)`)
+      .select(`id, name, status, notes, barcode, box_art_url, quantity_owned, quantity_allocated, quantity_used, location_id, price_paid, purchase_date, purchase_source_id, current_value, value_last_updated, created_at, updated_at, manufacturer_id, scale_id, kit_type_id, manufacturer:manufacturers(name), scale:scales(name, sort_order), kit_type:kit_types(name), loc:locations(name), purchase_source:purchase_sources(name)`)
       .eq("user_id", USER_ID)
       .then(r => r.data || []),
     safeFetch(

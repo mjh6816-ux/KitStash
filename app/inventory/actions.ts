@@ -5,6 +5,8 @@ import { revalidatePath } from "next/cache";
 import { createClient as createServiceClient } from '@supabase/supabase-js';
 import JSZip from 'jszip';
 
+/* eslint-disable @typescript-eslint/no-explicit-any -- FormData + dynamic selects + graceful fallback for evolving schema (new columns); keeps server actions simple */
+
 export async function receiveStock(formData: FormData) {
   const supabase = await createClient();
   const partId = formData.get("partId") as string;
@@ -181,7 +183,7 @@ export async function addAftermarketPart(formData: FormData) {
     throw new Error("Part name is required");
   }
 
-  let insertData: any = {
+  const insertData: any = {
     user_id: USER_ID,
     name,
     quantity_owned: quantity,
@@ -236,6 +238,7 @@ export async function addKit(formData: FormData) {
   const scaleId = formData.get("scaleId") as string || null;
   const kitTypeId = formData.get("kitTypeId") as string || null;
   const boxArtUrl = formData.get("box_art_url") as string || null;
+  const barcode = formData.get("barcode") as string || null;
 
   if (!name) {
     throw new Error("Kit name is required");
@@ -257,6 +260,7 @@ export async function addKit(formData: FormData) {
     scale_id: scaleId,
     kit_type_id: kitTypeId,
     box_art_url: boxArtUrl || null,
+    barcode,
   } as any).select("id, name").single();
 
   if (error) {
@@ -306,7 +310,7 @@ export async function addPaint(formData: FormData) {
 
   console.log("🟡 addPaint attempting full insert with:", { colorName, paintBrandId, paintTypeId });
 
-  let insertData: any = {
+  const insertData: any = {
     user_id: USER_ID,
     color_name: colorName,
     paint_brand_id: paintBrandId,
@@ -448,6 +452,7 @@ export async function updateKit(formData: FormData) {
   const scaleId = formData.get("scaleId") as string || null;
   const kitTypeId = formData.get("kitTypeId") as string || null;
   const boxArtUrl = formData.get("box_art_url") as string | null;
+  const barcode = formData.get("barcode") as string | null;
 
   if (!id || !name) throw new Error("Missing required fields for update");
 
@@ -464,6 +469,7 @@ export async function updateKit(formData: FormData) {
     manufacturer_id: manufacturerId,
     scale_id: scaleId,
     kit_type_id: kitTypeId,
+    barcode,
   };
 
   if (quantity !== undefined) {
@@ -520,7 +526,7 @@ export async function updatePaint(formData: FormData) {
 
   if (!id || !colorName) throw new Error("Missing required fields for update");
 
-  let updateData: any = {
+  const updateData: any = {
     color_name: colorName,
     paint_brand_id: paintBrandId,
     color_code: colorCode,
@@ -1161,10 +1167,13 @@ export async function getAllParts() {
   // Core select guaranteed to work (no optional newer columns/embeds).
   const coreSelect = `id, name, notes, image_url, quantity_owned, quantity_allocated, quantity_used, location_id, price_paid, purchase_date, purchase_source_id, current_value, value_last_updated, created_at, updated_at, manufacturer_id, scale_id, part_type_id, manufacturer:manufacturers(name), scale:scales(name), part_type:part_types(name), loc:locations(name), purchase_source:purchase_sources(name)`;
 
-  let { data, error } = await supabase
+  const { data: initialData, error: initialError } = await supabase
     .from("aftermarket_parts")
     .select(fullSelect)
     .eq("user_id", USER_ID);
+
+  let data = initialData;
+  const error = initialError;
 
   if (error) {
     // Any error on the rich select (missing columns, missing relationships in schema cache after ALTER without NOTIFY, etc.)
@@ -1205,7 +1214,7 @@ export async function getAllKits() {
   );
   const { data, error } = await supabase
     .from("kits")
-    .select(`id, name, status, notes, box_art_url, quantity_owned, quantity_allocated, quantity_used, location_id, price_paid, purchase_date, purchase_source_id, current_value, value_last_updated, created_at, updated_at, manufacturer_id, scale_id, kit_type_id, manufacturer:manufacturers(name), scale:scales(name, sort_order), kit_type:kit_types(name), loc:locations(name), purchase_source:purchase_sources(name)`)
+    .select(`id, name, status, notes, barcode, box_art_url, quantity_owned, quantity_allocated, quantity_used, location_id, price_paid, purchase_date, purchase_source_id, current_value, value_last_updated, created_at, updated_at, manufacturer_id, scale_id, kit_type_id, manufacturer:manufacturers(name), scale:scales(name, sort_order), kit_type:kit_types(name), loc:locations(name), purchase_source:purchase_sources(name)`)
     .eq("user_id", USER_ID);
   if (error) {
     console.error("getAllKits error:", error);
@@ -1230,10 +1239,13 @@ export async function getAllPaints() {
 
   const coreSelect = `id, color_name, brand, notes, quantity_owned, quantity_allocated, quantity_used, location_id, price_paid, purchase_date, purchase_source_id, current_value, value_last_updated, opened, created_at, updated_at, series, fs_number, ral_number, rlm_number, ana_number, paint_type_id, paint_brand_id, paint_type:paint_types(name), paint_brand:paint_brands(name), loc:locations(name), purchase_source:purchase_sources(name)`;
 
-  let { data, error } = await supabase
+  const { data: initialData, error: initialError } = await supabase
     .from("paints")
     .select(fullSelect)
     .eq("user_id", USER_ID);
+
+  let data = initialData;
+  const error = initialError;
 
   if (error) {
     // Any error on the rich select (missing columns, missing relationships in schema cache, etc.)

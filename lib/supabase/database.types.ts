@@ -161,6 +161,7 @@ export type Database = {
       }
       kits: {
         Row: {
+          barcode: string | null
           box_art_url: string | null
           created_at: string | null
           description: string | null
@@ -187,6 +188,7 @@ export type Database = {
           value_last_updated: string | null
         }
         Insert: {
+          barcode?: string | null
           box_art_url?: string | null
           created_at?: string | null
           description?: string | null
@@ -211,6 +213,7 @@ export type Database = {
           year_released?: number | null
         }
         Update: {
+          barcode?: string | null
           box_art_url?: string | null
           created_at?: string | null
           description?: string | null

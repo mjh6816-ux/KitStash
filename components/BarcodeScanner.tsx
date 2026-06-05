@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 
 interface BarcodeScannerProps {
   onDetected: (code: string) => void;
@@ -18,6 +18,7 @@ export default function BarcodeScanner({
 }: BarcodeScannerProps) {
   const scannerRef = useRef<any>(null);
   const containerId = "barcode-scanner-container";
+  const [initError, setInitError] = useState<string | null>(null);
 
   useEffect(() => {
     let html5QrCode: any = null;
@@ -42,20 +43,10 @@ export default function BarcodeScanner({
           config,
           (decodedText: string) => {
             if (!isMounted) return;
-            // Successful scan
+            // Successful scan - just notify parent.
+            // Parent will close the scanner (unmounting this component),
+            // and the cleanup will call stop().
             onDetected(decodedText.trim());
-
-            if (stopOnFirstDetection) {
-              // Stop scanning after first good read
-              html5QrCode
-                .stop()
-                .then(() => {
-                  if (onClose && isMounted) onClose();
-                })
-                .catch(() => {
-                  if (onClose && isMounted) onClose();
-                });
-            }
           },
           (errorMessage: string) => {
             if (!isMounted) return;
@@ -69,10 +60,14 @@ export default function BarcodeScanner({
             }
           }
         );
-      } catch (err) {
+      } catch (err: any) {
         console.error("Failed to start barcode scanner:", err);
+        const msg = err?.message || "Could not access camera. Please grant camera permission and try again.";
+        if (isMounted) {
+          setInitError(msg);
+        }
         if (onError && isMounted) {
-          onError("Could not access camera. Please grant camera permission and try again.");
+          onError(msg);
         }
       }
     })();
@@ -89,6 +84,16 @@ export default function BarcodeScanner({
       }
     };
   }, [onDetected, onError, onClose, stopOnFirstDetection]);
+
+  if (initError) {
+    return (
+      <div className="p-4 text-center text-sm text-red-400 border border-red-500/50 rounded-xl bg-zinc-950">
+        <p className="font-medium mb-1">Camera error</p>
+        <p>{initError}</p>
+        <p className="text-[10px] text-zinc-500 mt-2">Try closing and reopening the scanner, or check camera permissions in your browser settings.</p>
+      </div>
+    );
+  }
 
   return (
     <div className="relative">

@@ -19,7 +19,7 @@ As of the latest run:
   - This feature checks passwords against Have I Been Pwned during Auth signups.
   - **Impact for KitStash**: Very low.
     - This is a personal/single-user app.
-    - Primary protection is **Vercel Password Protection** (see DEPLOY.md).
+    - Primary protection is the app-level shared password gate (see DEPLOY.md `SITE_PASSWORD`).
     - Data access is primarily via service role key from server actions + RLS policies.
     - No public user registration flow exists.
   - Can be enabled if you upgrade to Supabase Pro.

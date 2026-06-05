@@ -1,8 +1,8 @@
-# Deploying KitStash (Vercel + Password Protection)
+# Deploying KitStash
 
 This is the recommended path for getting a stable, always-on HTTPS URL you can use from your phone or anywhere (garage, travel, etc.).
 
-The app is a single-user personal tool. We use Vercel's built-in password protection for security with zero extra code.
+The app is a single-user personal tool. We use a simple built-in shared password gate (via Edge proxy + server guard) for security. It works on all Vercel plans (including free Hobby) with zero extra cost. Vercel's built-in Deployment Protection can be layered on top optionally.
 
 ## Prerequisites
 - A GitHub account (free)

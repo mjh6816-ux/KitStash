@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useRef } from "react";
-import { Html5Qrcode } from "html5-qrcode";
 
 interface BarcodeScannerProps {
   onDetected: (code: string) => void;
@@ -17,59 +16,70 @@ export default function BarcodeScanner({
   onClose,
   stopOnFirstDetection = true,
 }: BarcodeScannerProps) {
-  const scannerRef = useRef<Html5Qrcode | null>(null);
+  const scannerRef = useRef<any>(null);
   const containerId = "barcode-scanner-container";
 
   useEffect(() => {
-    const html5QrCode = new Html5Qrcode(containerId);
-    scannerRef.current = html5QrCode;
+    let html5QrCode: any = null;
+    let isMounted = true;
 
-    const config = {
-      fps: 10,
-      qrbox: { width: 250, height: 150 }, // good for 1D barcodes on boxes
-      aspectRatio: 1.5,
-    };
+    (async () => {
+      try {
+        const { Html5Qrcode } = await import("html5-qrcode");
+        if (!isMounted) return;
 
-    html5QrCode
-      .start(
-        { facingMode: "environment" }, // prefer back camera
-        config,
-        (decodedText) => {
-          // Successful scan
-          onDetected(decodedText.trim());
+        html5QrCode = new Html5Qrcode(containerId);
+        scannerRef.current = html5QrCode;
 
-          if (stopOnFirstDetection) {
-            // Stop scanning after first good read
-            html5QrCode
-              .stop()
-              .then(() => {
-                if (onClose) onClose();
-              })
-              .catch(() => {
-                if (onClose) onClose();
-              });
+        const config = {
+          fps: 10,
+          qrbox: { width: 250, height: 150 }, // good for 1D barcodes on boxes
+          aspectRatio: 1.5,
+        };
+
+        await html5QrCode.start(
+          { facingMode: "environment" }, // prefer back camera
+          config,
+          (decodedText: string) => {
+            if (!isMounted) return;
+            // Successful scan
+            onDetected(decodedText.trim());
+
+            if (stopOnFirstDetection) {
+              // Stop scanning after first good read
+              html5QrCode
+                .stop()
+                .then(() => {
+                  if (onClose && isMounted) onClose();
+                })
+                .catch(() => {
+                  if (onClose && isMounted) onClose();
+                });
+            }
+          },
+          (errorMessage: string) => {
+            if (!isMounted) return;
+            // Ignore frequent "no code found" messages; only surface real errors
+            if (
+              onError &&
+              !errorMessage.includes("No QR code found") &&
+              !errorMessage.includes("No barcode found")
+            ) {
+              onError(errorMessage);
+            }
           }
-        },
-        (errorMessage) => {
-          // Ignore frequent "no code found" messages; only surface real errors
-          if (
-            onError &&
-            !errorMessage.includes("No QR code found") &&
-            !errorMessage.includes("No barcode found")
-          ) {
-            onError(errorMessage);
-          }
-        }
-      )
-      .catch((err) => {
+        );
+      } catch (err) {
         console.error("Failed to start barcode scanner:", err);
-        if (onError) {
+        if (onError && isMounted) {
           onError("Could not access camera. Please grant camera permission and try again.");
         }
-      });
+      }
+    })();
 
     // Cleanup on unmount
     return () => {
+      isMounted = false;
       if (scannerRef.current) {
         scannerRef.current
           .stop()

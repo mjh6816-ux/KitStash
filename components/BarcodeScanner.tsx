@@ -33,8 +33,8 @@ export default function BarcodeScanner({
         scannerRef.current = html5QrCode;
 
         const config = {
-          fps: 18, // higher fps for faster detection (tradeoff vs battery/heat on mobile)
-          qrbox: { width: 380, height: 110 }, // wider + shorter rectangle, better for linear 1D barcodes on kit boxes
+          fps: 22, // bumped for snappier detection on modern phones
+          qrbox: { width: 420, height: 130 }, // generous wide rectangle for typical kit box 1D barcodes
           aspectRatio: 1.6,
           formatsToSupport: [
             Html5QrcodeSupportedFormats.EAN_13,
@@ -44,6 +44,9 @@ export default function BarcodeScanner({
             Html5QrcodeSupportedFormats.CODE_128,
             Html5QrcodeSupportedFormats.CODE_39,
           ],
+          experimentalFeatures: {
+            useBarCodeDetectorIfSupported: true, // uses native detector when available (big speed win on Chrome/Edge/Android)
+          },
         };
 
         await html5QrCode.start(

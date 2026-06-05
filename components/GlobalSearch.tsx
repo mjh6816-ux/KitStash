@@ -202,7 +202,7 @@ export default function GlobalSearch() {
         {isScanningBarcode && (
           <div className="p-4 border-b border-zinc-800">
             <div className="flex justify-between items-center mb-2">
-              <div className="text-sm font-medium">Scanning for kit barcode</div>
+              <div className="text-sm font-medium">Scan kit barcode for stock lookup</div>
               <button onClick={() => setIsScanningBarcode(false)} className="text-xs text-zinc-400 hover:text-white">Cancel</button>
             </div>
             <BarcodeScanner

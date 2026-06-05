@@ -1625,8 +1625,8 @@ export default function InventoryClient({
           <div className="bg-zinc-900 rounded-2xl p-5 w-full max-w-md border border-zinc-700">
             <div className="flex items-center justify-between mb-3">
               <div>
-                <div className="font-semibold">Scan Barcode</div>
-                <div className="text-xs text-zinc-500">Point at the kit box barcode</div>
+                <div className="font-semibold">Scan Kit Barcode</div>
+                <div className="text-xs text-zinc-500">Use the largest retail UPC/EAN barcode on the box (ignore small/internal codes)</div>
               </div>
               <Button
                 variant="outline"

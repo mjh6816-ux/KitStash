@@ -26,16 +26,24 @@ export default function BarcodeScanner({
 
     (async () => {
       try {
-        const { Html5Qrcode } = await import("html5-qrcode");
+        const { Html5Qrcode, Html5QrcodeSupportedFormats } = await import("html5-qrcode");
         if (!isMounted) return;
 
         html5QrCode = new Html5Qrcode(containerId);
         scannerRef.current = html5QrCode;
 
         const config = {
-          fps: 10,
-          qrbox: { width: 250, height: 150 }, // good for 1D barcodes on boxes
-          aspectRatio: 1.5,
+          fps: 18, // higher fps for faster detection (tradeoff vs battery/heat on mobile)
+          qrbox: { width: 380, height: 110 }, // wider + shorter rectangle, better for linear 1D barcodes on kit boxes
+          aspectRatio: 1.6,
+          formatsToSupport: [
+            Html5QrcodeSupportedFormats.EAN_13,
+            Html5QrcodeSupportedFormats.UPC_A,
+            Html5QrcodeSupportedFormats.UPC_E,
+            Html5QrcodeSupportedFormats.EAN_8,
+            Html5QrcodeSupportedFormats.CODE_128,
+            Html5QrcodeSupportedFormats.CODE_39,
+          ],
         };
 
         await html5QrCode.start(
@@ -103,7 +111,8 @@ export default function BarcodeScanner({
         style={{ minHeight: "220px" }}
       />
       <p className="mt-2 text-center text-[10px] text-zinc-500">
-        Point camera at the barcode on the box. Works best in good lighting.
+        Align the <strong>largest retail barcode</strong> (UPC/EAN, usually 12 digits) horizontally in the box.<br />
+        Good lighting + steady hold helps a lot. Ignore smaller codes or QR codes on the box.
       </p>
     </div>
   );

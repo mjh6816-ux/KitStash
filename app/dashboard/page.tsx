@@ -4,6 +4,7 @@ import { getAllParts, getAllKits, getAllPaints, getAllProjects, getAllProjectAll
 export const dynamic = "force-dynamic";
 import { Button } from "@/components/ui/button";
 import { Package, Wrench, AlertTriangle, TrendingUp, ArrowRight } from "lucide-react";
+import ScanKitButton from "@/components/ScanKitButton";
 
 /* eslint-disable @typescript-eslint/no-explicit-any -- dynamic joined data from Supabase; pragmatic for this inventory app */
 
@@ -120,23 +121,7 @@ export default async function DashboardPage() {
           <Link href="/reports">
             <Button size="sm">Reports <ArrowRight className="ml-1.5 h-4 w-4" /></Button>
           </Link>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => {
-              // Quick global way to trigger barcode scanner for kit lookup from dashboard
-              // This will be picked up by the always-mounted GlobalSearch logic or InventoryClient
-              const searchBtn = document.querySelector('[title*="Global search"]') as HTMLElement;
-              if (searchBtn) searchBtn.click();
-              // After search opens, user can tap the 📷 Scan inside it.
-              // For direct, we dispatch the lookup trigger (handled in InventoryClient when on /inventory)
-              setTimeout(() => {
-                window.dispatchEvent(new CustomEvent("trigger-barcode-lookup"));
-              }, 300);
-            }}
-          >
-            📷 Scan Kit
-          </Button>
+          <ScanKitButton />
         </div>
       </div>
 

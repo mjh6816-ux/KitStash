@@ -7,6 +7,7 @@ import { Search, X, Package, Wrench, Droplet } from "lucide-react";
 import BarcodeScanner from "@/components/BarcodeScanner";
 
 /* eslint-disable @typescript-eslint/no-explicit-any -- search results from inventory fetches */
+/* eslint-disable @next/next/no-img-element -- search result thumbnails use dynamic user-uploaded image URLs; optimization not critical in modal */
 
 /**
  * GlobalSearch

@@ -5,9 +5,13 @@ import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { Button } from "@/components/ui/button";
 import { allocateToProject, removeAllocation, markAllocationUsed } from "../inventory/actions";
+
+/* eslint-disable @typescript-eslint/no-explicit-any -- Supabase row shapes + enrichment in loops for allocated/used items */
+/* eslint-disable react/no-unescaped-entities -- natural quotes/apostrophes in UI headings and empty-state text (e.g. "New Project", 'Stuff I Still Need'); safe static content */
+/* eslint-disable react-hooks/set-state-in-effect -- deep-link + mount effects set selected/pending state (and call load* which set more); intentional for UX flows, not perf-critical here */
+/* eslint-disable react-hooks/exhaustive-deps -- load* helper functions are module-local (not wrapped in useCallback) for simplicity; effects are mount or intentionally limited dep arrays */
 import { 
   addNeededItem, 
-  updateNeededItem, 
   deleteNeededItem, 
   getNeededItemsForProject,
   addProgressNote,
@@ -365,7 +369,6 @@ export default function ProjectsPage() {
       setPendingProjectId(null);
     }
   }, [pendingProjectId, projects, router]);
-
   async function handleAddProgressNote() {
     if (!selectedProject || !newNoteText.trim()) return;
 

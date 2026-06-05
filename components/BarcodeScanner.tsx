@@ -2,6 +2,8 @@
 
 import { useEffect, useRef, useState } from "react";
 
+/* eslint-disable @typescript-eslint/no-explicit-any -- html5-qrcode lib instances and callbacks use loose types (dynamic import, limited official TS); pragmatic for scanner component */
+
 interface BarcodeScannerProps {
   onDetected: (code: string) => void;
   onError?: (err: string) => void;

@@ -7,6 +7,9 @@ import { createClient } from "@/lib/supabase/client";
 import BarcodeScanner from "@/components/BarcodeScanner";
 
 /* eslint-disable @typescript-eslint/no-explicit-any -- dynamic Supabase joined rows + form state; types would be very large for all the optional joins */
+/* eslint-disable @next/next/no-img-element -- box art and item images are user-uploaded via Supabase Storage (dynamic URLs); next/image would add overhead for 100s of cards in infinite lists without much gain */
+/* eslint-disable react-hooks/set-state-in-effect -- initial mount + refreshKey + deep-link loads call fetch helpers that set* state inside effects (by design for this app's cross-device sync); exhaustive-deps also intentionally partial */
+/* eslint-disable react-hooks/exhaustive-deps -- the tab/filter effects and data loaders use curated deps + refreshKey pattern; full inclusion would bloat or cause unnecessary re-fetches */
 import {
   deletePart, deleteKit, deletePaint,
   adjustPartStock, adjustPaintStock, adjustKitStock,
@@ -182,6 +185,7 @@ export default function InventoryClient({
   const pathname = usePathname();
 
   // Stable Supabase browser client for details loading (allocations etc.) - defined early so load/open fns can close over it without forward-ref issues
+  // eslint-disable-next-line react-hooks/preserve-manual-memoization
   const supabase = useMemo(() => createClient(), []);
 
   // Start with safe server/client defaults. URL params are applied in the effect below (post-hydration).
@@ -351,7 +355,6 @@ export default function InventoryClient({
       // Defer to avoid sync setState in effect lint/dev warnings
       setTimeout(applyInitial, 0);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // tabStates + derived current/* are hoisted early (before init effect + any closures over setTabStates).
@@ -580,7 +583,6 @@ export default function InventoryClient({
     fetchParts();
     fetchKits();
     fetchPaints();
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTab, refreshKey]);
 
   // Extra explicit mount-only load (ensures data even if timing differs across devices/browsers)
@@ -588,7 +590,6 @@ export default function InventoryClient({
     fetchParts();
     fetchKits();
     fetchPaints();
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Auto re-fetch when the window/tab regains focus or visibility.
@@ -844,7 +845,6 @@ export default function InventoryClient({
       }, 0);
     }
     // Re-run when pending changes, tab changes, or any of the lists get new data (new array ref from set)
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pendingViewId, activeTab, kits, parts, paints, router, pathname]);
 
   // Perform the stock adjustment

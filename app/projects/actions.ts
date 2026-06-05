@@ -3,6 +3,8 @@
 import { createClient } from "@/lib/supabase/server";
 import { revalidatePath } from "next/cache";
 
+/* eslint-disable @typescript-eslint/no-explicit-any -- Supabase dynamic table access + row shapes for project features (allocations, needed items, notes, references); schema evolves via migrations */
+
 // Centralized single-user ID
 const userId =
   process.env.SUPABASE_USER_ID || "a8e4287a-040b-41dd-ba45-87f6a3c07395";

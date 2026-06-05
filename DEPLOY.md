@@ -68,16 +68,33 @@ In the Vercel import screen (or after import: Project → Settings → Environme
 
 After adding the variables, trigger the deploy.
 
-## Step 4: Enable Password Protection (security for personal use)
+## Step 4: Enable Protection (security for personal use)
 
-After the first successful deploy:
+KitStash now includes a built-in shared password gate (via Next.js middleware) that works on **all Vercel plans** including free Hobby. This is the recommended reliable method.
 
-1. Go to your project on Vercel → **Settings** → **General**
-2. Scroll to **Vercel Authentication**
-3. Turn on **Password Protection**
-4. Set a strong password you will remember (this is for you only)
+### Recommended: Set `SITE_PASSWORD` (works everywhere)
 
-Now the entire site (including the API routes / server actions) is protected by that password. Anyone without it gets a login screen from Vercel.
+1. In Vercel: Project → **Settings** → **Environment Variables**
+2. Add a new variable:
+   - Name: `SITE_PASSWORD`
+   - Value: a strong password only you know
+   - Environment: Production (and Preview if you want)
+3. Redeploy the project (or push a commit).
+
+On any device, visitors will now see a clean "Enter password" screen before the app loads. The cookie remembers the device for ~90 days.
+
+You can also set `SITE_PASSWORD` in your local `.env.local` to protect `npm run dev`.
+
+### Alternative / Additional: Vercel Deployment Protection
+
+Vercel offers built-in options under **Settings → Deployment Protection** (in the sidebar).
+
+- "Vercel Authentication" (login with Vercel account) is more limited.
+- Full "Password Protection" (simple shared password) requires a **Pro plan + Advanced Deployment Protection add-on** or Enterprise.
+
+If you have access to it, you can enable it in addition to (or instead of) the `SITE_PASSWORD` gate. The app-level gate is usually sufficient and free.
+
+After enabling any protection, test from an incognito window and a different device/network.
 
 ## Step 5: Test from Phone (the whole point)
 
@@ -102,7 +119,7 @@ To update env vars later: Project → Settings → Environment Variables → Red
 
 See **[SECURITY.md](./SECURITY.md)** for the current state of the Supabase Security Advisor, RLS policies, and known items (including the one Pro-only warning that remains).
 
-The main runtime protection for the deployed app is Vercel Password Protection (Step 4 above) + Supabase RLS policies scoped to your single user.
+The main runtime protection for the deployed app is the built-in `SITE_PASSWORD` gate (middleware) + Supabase RLS policies scoped to your single user. Vercel Deployment Protection can be used in addition if you are on a paid plan.
 
 ## Optional next improvements (after it's working remotely)
 

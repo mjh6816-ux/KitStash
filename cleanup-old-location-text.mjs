@@ -24,7 +24,7 @@ const USER_ID = 'a8e4287a-040b-41dd-ba45-87f6a3c07395';
 async function cleanup(table) {
   console.log(`Cleaning ${table}...`);
 
-  const { data, error } = await supabase
+  const { error } = await supabase
     .from(table)
     .update({ location: null })
     .eq('user_id', USER_ID)

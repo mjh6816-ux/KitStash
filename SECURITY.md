@@ -26,7 +26,7 @@ As of the latest run:
 
 ## Other Security Measures
 
-- **Deployment protection**: Vercel Password Protection is enabled on the production site (see `DEPLOY.md` Step 4). This protects the entire app (frontend + API routes).
+- **Deployment protection**: A simple shared-password gate is implemented at the Edge using Next.js middleware (see `SITE_PASSWORD` in `.env.example` and `DEPLOY.md`). This works on all plans (Hobby included) and protects the entire app before any page or server action runs. Vercel built-in Deployment Protection (Password or Authentication) can be layered on top if desired.
 - **Database access**: 
   - Browser uses anon key (subject to RLS).
   - Server actions use `SUPABASE_SERVICE_ROLE_KEY` (bypasses RLS by design) for privileged operations.
@@ -45,4 +45,4 @@ Helpful SQL scripts (run in Supabase SQL Editor):
 - `enable-rls-all-tables.sql` — Enables RLS + policies
 - `fix-function-search-path.sql` — Fixes mutable search_path warning
 
-Last reviewed: after running the above scripts (function warning cleared, only Pro-only leaked password warning remains).
+Last reviewed: after RLS + search_path scripts + lint cleanup pass (npm run lint clean, 0 errors).

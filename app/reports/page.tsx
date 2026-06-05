@@ -5,6 +5,8 @@ import { exportInventoryData, getAllParts, getAllKits, getAllPaints, getAllProje
 import { Button } from "@/components/ui/button";
 import { BarChart3, Download, AlertTriangle, TrendingUp } from "lucide-react";
 
+/* eslint-disable @typescript-eslint/no-explicit-any -- report computations over joined inventory rows */
+
 export default function ReportsPage() {
   const [loading, setLoading] = useState(true);
   const [parts, setParts] = useState<any[]>([]);

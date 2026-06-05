@@ -21,7 +21,7 @@ async function seedBrands() {
 
   const rows = brands.map(name => ({ name }));
 
-  const { data, error } = await supabase
+  const { error } = await supabase
     .from('paint_brands')
     .upsert(rows, {
       onConflict: 'name',

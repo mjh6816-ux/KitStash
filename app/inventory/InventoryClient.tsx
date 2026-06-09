@@ -16,7 +16,7 @@ import {
   addAftermarketPart, addKit, addPaint,
   updateAftermarketPart, updateKit, updatePaint,
   uploadInventoryImage,
-  createManufacturer, createScale, createPartType, createKitType, createPaintType, createPaintBrand, createLocation, createPurchaseSource,
+  createManufacturer, createScale, createPartType, createKitType, createKitMaterial, createPaintType, createPaintBrand, createLocation, createPurchaseSource,
   getAllParts, getAllKits, getAllPaints,
   bulkAddPaints,
   type PaintImportDraft,
@@ -27,6 +27,7 @@ export default function InventoryClient({
   scales,
   partTypes,
   kitTypes,
+  kitMaterials,
   paintTypes,
   paintBrands,
   locations,
@@ -39,6 +40,7 @@ export default function InventoryClient({
   scales: { id: string; name: string }[];
   partTypes: { id: string; name: string }[];
   kitTypes: { id: string; name: string }[];
+  kitMaterials: { id: string; name: string }[];
   paintTypes: { id: string; name: string }[];
   paintBrands: { id: string; name: string }[];
   locations: { id: string; name: string }[];
@@ -75,6 +77,7 @@ export default function InventoryClient({
     scale: "",
     partType: "",
     kitType: "",
+    kitMaterial: "",
     paintType: "",
     paintBrand: "",
     location: "",
@@ -378,6 +381,7 @@ export default function InventoryClient({
     scales,
     partTypes,
     kitTypes,
+    kitMaterials,
     paintTypes,
     paintBrands,
     locations,
@@ -398,11 +402,21 @@ export default function InventoryClient({
         supabaseClient.from("purchase_sources").select("id, name").order("name"),
       ]);
 
+      // kit_materials is new -- fetch separately with fallback
+      let kmData: any[] = [];
+      try {
+        const kmRes = await supabaseClient.from("kit_materials").select("id, name").order("name");
+        kmData = kmRes.data || [];
+      } catch (e) {
+        console.warn("kit_materials lookup not available yet (run migration).", e);
+      }
+
       setLookupData({
         manufacturers: m.data || [],
         scales: s.data || [],
         partTypes: pt.data || [],
         kitTypes: kt.data || [],
+        kitMaterials: kmData,
         paintTypes: paintT.data || [],
         paintBrands: paintB.data || [],
         locations: locs.data || [],
@@ -467,6 +481,9 @@ export default function InventoryClient({
           break;
         case "kitType":
           result = await createKitType(value);
+          break;
+        case "kitMaterial":
+          result = await createKitMaterial(value);
           break;
         case "paintType":
           result = await createPaintType(value);
@@ -1691,6 +1708,8 @@ export default function InventoryClient({
               const mfg = kit.manufacturer;
               const scl = kit.scale;
               const typ = kit.kit_type;
+              const mat = kit.kit_material;
+              const cat = kit.catalog_number;
 
               return (
                 <div 
@@ -1708,7 +1727,8 @@ export default function InventoryClient({
                   <div className="flex-1 min-w-0">
                     <div className={`font-medium ${density === "compact" ? "text-base" : "text-lg"}`}>{kit.name}</div>
                     <div className="text-xs text-zinc-400 mt-0.5">
-                      {[typ?.name, scl?.name, mfg?.name].filter(Boolean).join(" • ")}
+                      {[typ?.name, mat?.name, scl?.name, mfg?.name].filter(Boolean).join(" • ")}
+                      {cat && <span className="ml-2 text-[10px] text-zinc-500">#{cat}</span>}
                       {kit.barcode && <span className="ml-2 font-mono text-[10px] text-amber-400/70">{kit.barcode}</span>}
                     </div>
                     {kit.loc?.name && <div className="text-[10px] text-zinc-500 mt-0.5">Location: {kit.loc.name}</div>}
@@ -2395,6 +2415,15 @@ export default function InventoryClient({
                       className="w-full rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm"
                     />
 
+                    <input
+                      type="text"
+                      name="catalogNumber"
+                      placeholder="Catalog Number (mfg's kit #)"
+                      value={formValues?.catalog_number ?? ""}
+                      onChange={(e) => setFormValues((prev: any) => ({ ...prev, catalog_number: e.target.value }))}
+                      className="w-full rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm"
+                    />
+
                     {/* Barcode with scan button (especially useful for kits) */}
                     <div className="flex gap-2 items-center">
                       <input
@@ -2447,6 +2476,15 @@ export default function InventoryClient({
                     >
                       <option value="">Kit Type</option>
                       {lookupData.kitTypes.map(k => <option key={k.id} value={k.id}>{k.name}</option>)}
+                    </select>
+                    <select
+                      name="kitMaterialId"
+                      value={formValues?.kit_material_id ?? ""}
+                      onChange={(e) => setFormValues((prev: any) => ({ ...prev, kit_material_id: e.target.value }))}
+                      className="w-full rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm"
+                    >
+                      <option value="">Kit Material</option>
+                      {lookupData.kitMaterials.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
                     </select>
                     <select
                       name="status"
@@ -2507,6 +2545,14 @@ export default function InventoryClient({
                       className="w-full rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm" 
                     />
 
+                    <input 
+                      type="text" 
+                      name="catalogNumber" 
+                      placeholder="Catalog Number (mfg's kit #)" 
+                      defaultValue=""
+                      className="w-full rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm" 
+                    />
+
                     {/* Barcode for new kit add */}
                     <div className="flex gap-2">
                       <input
@@ -2555,6 +2601,10 @@ export default function InventoryClient({
                     <select name="kitTypeId" className="w-full rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm">
                       <option value="">Kit Type</option>
                       {lookupData.kitTypes.map(k => <option key={k.id} value={k.id}>{k.name}</option>)}
+                    </select>
+                    <select name="kitMaterialId" className="w-full rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm">
+                      <option value="">Kit Material</option>
+                      {lookupData.kitMaterials.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
                     </select>
                     <select name="status" className="w-full rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm">
                       <option value="in_stash">In Stash</option>
@@ -2877,17 +2927,30 @@ export default function InventoryClient({
 
                 {/* Kit-specific */}
                 {addType === "kit" && (
-                  <div className="flex items-center gap-1">
-                    <input
-                      type="text"
-                      placeholder="New Kit Type"
-                      value={quickAddValues.kitType}
-                      onChange={(e) => updateQuickAdd("kitType", e.target.value)}
-                      className="flex-1 rounded-lg border border-zinc-700 bg-zinc-950 px-2 py-1 text-xs"
-                      onKeyDown={(e) => e.key === "Enter" && handleQuickAdd("kitType")}
-                    />
-                    <Button type="button" variant="outline" onClick={() => handleQuickAdd("kitType")} className="h-6 w-6 p-0 text-xs flex items-center justify-center flex-shrink-0">+</Button>
-                  </div>
+                  <>
+                    <div className="flex items-center gap-1">
+                      <input
+                        type="text"
+                        placeholder="New Kit Type"
+                        value={quickAddValues.kitType}
+                        onChange={(e) => updateQuickAdd("kitType", e.target.value)}
+                        className="flex-1 rounded-lg border border-zinc-700 bg-zinc-950 px-2 py-1 text-xs"
+                        onKeyDown={(e) => e.key === "Enter" && handleQuickAdd("kitType")}
+                      />
+                      <Button type="button" variant="outline" onClick={() => handleQuickAdd("kitType")} className="h-6 w-6 p-0 text-xs flex items-center justify-center flex-shrink-0">+</Button>
+                    </div>
+                    <div className="flex items-center gap-1">
+                      <input
+                        type="text"
+                        placeholder="New Kit Material"
+                        value={quickAddValues.kitMaterial}
+                        onChange={(e) => updateQuickAdd("kitMaterial", e.target.value)}
+                        className="flex-1 rounded-lg border border-zinc-700 bg-zinc-950 px-2 py-1 text-xs"
+                        onKeyDown={(e) => e.key === "Enter" && handleQuickAdd("kitMaterial")}
+                      />
+                      <Button type="button" variant="outline" onClick={() => handleQuickAdd("kitMaterial")} className="h-6 w-6 p-0 text-xs flex items-center justify-center flex-shrink-0">+</Button>
+                    </div>
+                  </>
                 )}
 
                 {/* Paint-specific */}
@@ -3219,9 +3282,12 @@ export default function InventoryClient({
                 <div className="text-sm text-zinc-400">Kit Details</div>
                 <h2 className="text-2xl font-semibold mt-1">{viewingKit.name}</h2>
                 <div className="text-sm text-zinc-400 mt-1">
-                  {[viewingKit.kit_type?.name, viewingKit.scale?.name, viewingKit.manufacturer?.name]
+                  {[viewingKit.kit_type?.name, viewingKit.kit_material?.name, viewingKit.scale?.name, viewingKit.manufacturer?.name]
                     .filter(Boolean)
                     .join(" • ")}
+                  {viewingKit.catalog_number && (
+                    <span className="ml-2 text-zinc-500">#{viewingKit.catalog_number}</span>
+                  )}
                   {viewingKit.barcode && (
                     <span className="ml-3 font-mono text-amber-400/80">{viewingKit.barcode}</span>
                   )}

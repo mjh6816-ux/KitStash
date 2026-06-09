@@ -97,6 +97,7 @@ BEGIN
     'scales',
     'locations',
     'kit_types',
+    'kit_materials',
     'part_types',
     'paint_types',
     'paint_brands',

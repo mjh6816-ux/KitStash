@@ -237,6 +237,8 @@ export async function addKit(formData: FormData) {
   const manufacturerId = formData.get("manufacturerId") as string || null;
   const scaleId = formData.get("scaleId") as string || null;
   const kitTypeId = formData.get("kitTypeId") as string || null;
+  const kitMaterialId = formData.get("kitMaterialId") as string || null;
+  const catalogNumber = formData.get("catalogNumber") as string || null;
   const boxArtUrl = formData.get("box_art_url") as string || null;
   const barcode = formData.get("barcode") as string || null;
 
@@ -259,6 +261,8 @@ export async function addKit(formData: FormData) {
     manufacturer_id: manufacturerId,
     scale_id: scaleId,
     kit_type_id: kitTypeId,
+    kit_material_id: kitMaterialId,
+    catalog_number: catalogNumber,
     box_art_url: boxArtUrl || null,
     barcode,
   } as any).select("id, name").single();
@@ -451,6 +455,8 @@ export async function updateKit(formData: FormData) {
   const manufacturerId = formData.get("manufacturerId") as string || null;
   const scaleId = formData.get("scaleId") as string || null;
   const kitTypeId = formData.get("kitTypeId") as string || null;
+  const kitMaterialId = formData.get("kitMaterialId") as string || null;
+  const catalogNumber = formData.get("catalogNumber") as string || null;
   const boxArtUrl = formData.get("box_art_url") as string | null;
   const barcode = formData.get("barcode") as string | null;
 
@@ -469,6 +475,8 @@ export async function updateKit(formData: FormData) {
     manufacturer_id: manufacturerId,
     scale_id: scaleId,
     kit_type_id: kitTypeId,
+    kit_material_id: kitMaterialId,
+    catalog_number: catalogNumber,
     barcode,
   };
 
@@ -690,6 +698,24 @@ export async function createKitType(name: string) {
     .single();
 
   if (error) throw new Error(`Failed to create kit type: ${error.message}`);
+  revalidatePath("/inventory");
+  return data;
+}
+
+export async function createKitMaterial(name: string) {
+  const supabase = createServiceClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.SUPABASE_SERVICE_ROLE_KEY!,
+    { auth: { autoRefreshToken: false, persistSession: false } }
+  );
+
+  const { data, error } = await supabase
+    .from("kit_materials")
+    .insert({ name: name.trim() })
+    .select("id, name")
+    .single();
+
+  if (error) throw new Error(`Failed to create kit material: ${error.message}`);
   revalidatePath("/inventory");
   return data;
 }
@@ -1060,6 +1086,14 @@ export async function exportInventoryData() {
     supabase.from("purchase_sources").select("*"),
   ]);
 
+  let kitMaterials: any[] = [];
+  try {
+    const kmRes = await supabase.from("kit_materials").select("*");
+    kitMaterials = kmRes.data || [];
+  } catch (e) {
+    console.warn("kit_materials table missing for export (run the migration).");
+  }
+
   const zip = new JSZip();
 
   zip.file("aftermarket_parts.csv", toCSV(parts || []));
@@ -1070,6 +1104,7 @@ export async function exportInventoryData() {
   zip.file("scales.csv", toCSV(scales || []));
   zip.file("part_types.csv", toCSV(partTypes || []));
   zip.file("kit_types.csv", toCSV(kitTypes || []));
+  zip.file("kit_materials.csv", toCSV(kitMaterials || []));
   zip.file("paint_types.csv", toCSV(paintTypes || []));
   zip.file("paint_brands.csv", toCSV(paintBrands || []));
   zip.file("purchase_sources.csv", toCSV(purchaseSources || []));
@@ -1088,6 +1123,7 @@ FILES INCLUDED:
 - scales.csv
 - part_types.csv
 - kit_types.csv
+- kit_materials.csv
 - paint_types.csv
 - paint_brands.csv
 - purchase_sources.csv
@@ -1454,10 +1490,36 @@ export async function getAllKits() {
       },
     }
   );
-  const { data, error } = await supabase
+  const fullSelect = `id, name, status, notes, barcode, box_art_url, quantity_owned, quantity_allocated, quantity_used, location_id, price_paid, purchase_date, purchase_source_id, current_value, value_last_updated, created_at, updated_at, manufacturer_id, scale_id, kit_type_id, kit_material_id, catalog_number, manufacturer:manufacturers(name), scale:scales(name, sort_order), kit_type:kit_types(name), kit_material:kit_materials(name), loc:locations(name), purchase_source:purchase_sources(name)`;
+  const coreSelect = `id, name, status, notes, barcode, box_art_url, quantity_owned, quantity_allocated, quantity_used, location_id, price_paid, purchase_date, purchase_source_id, current_value, value_last_updated, created_at, updated_at, manufacturer_id, scale_id, kit_type_id, manufacturer:manufacturers(name), scale:scales(name, sort_order), kit_type:kit_types(name), loc:locations(name), purchase_source:purchase_sources(name)`;
+
+  let data, error;
+  const { data: initialData, error: initialError } = await supabase
     .from("kits")
-    .select(`id, name, status, notes, barcode, box_art_url, quantity_owned, quantity_allocated, quantity_used, location_id, price_paid, purchase_date, purchase_source_id, current_value, value_last_updated, created_at, updated_at, manufacturer_id, scale_id, kit_type_id, manufacturer:manufacturers(name), scale:scales(name, sort_order), kit_type:kit_types(name), loc:locations(name), purchase_source:purchase_sources(name)`)
+    .select(fullSelect)
     .eq("user_id", USER_ID);
+
+  if (initialError) {
+    console.warn("getAllKits: full select failed (likely missing kit_materials table or new columns catalog_number/kit_material_id -- run add-kit-catalog-and-material.sql migration)", initialError);
+    const fallback = await supabase
+      .from("kits")
+      .select(coreSelect)
+      .eq("user_id", USER_ID);
+    data = fallback.data;
+    error = fallback.error;
+    if (data) {
+      data = data.map((row: any) => ({
+        ...row,
+        catalog_number: null,
+        kit_material_id: null,
+        kit_material: null,
+      }));
+    }
+  } else {
+    data = initialData;
+    error = initialError;
+  }
+
   if (error) {
     console.error("getAllKits error:", error);
     throw error;

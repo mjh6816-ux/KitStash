@@ -24,6 +24,16 @@ export default async function InventoryPage() {
     supabase.from("purchase_sources").select("id, name").order("name"),
   ]);
 
+  // kit_materials is newer -- fetch with fallback so page loads even before running the migration
+  let kitMaterials: { id: string; name: string }[] = [];
+  try {
+    const kmRes = await supabase.from("kit_materials").select("id, name").order("name");
+    kitMaterials = kmRes.data || [];
+  } catch (e) {
+    console.warn("kit_materials table not found yet (run add-kit-catalog-and-material.sql). Using empty list for now.", e);
+    kitMaterials = [];
+  }
+
   const manufacturers = manufacturersRes.data || [];
   const scales = scalesRes.data || [];
   const partTypes = partTypesRes.data || [];
@@ -78,17 +88,42 @@ export default async function InventoryPage() {
     }));
   }
 
+  // Safe fetch for kits with fallback for catalog_number + kit_material (new in add-kit-catalog-and-material.sql)
+  async function safeFetchKits(userId: string) {
+    const fullSelect = `id, name, status, notes, barcode, box_art_url, quantity_owned, quantity_allocated, quantity_used, location_id, price_paid, purchase_date, purchase_source_id, current_value, value_last_updated, created_at, updated_at, manufacturer_id, scale_id, kit_type_id, kit_material_id, catalog_number, manufacturer:manufacturers(name), scale:scales(name, sort_order), kit_type:kit_types(name), kit_material:kit_materials(name), loc:locations(name), purchase_source:purchase_sources(name)`;
+    const coreSelect = `id, name, status, notes, barcode, box_art_url, quantity_owned, quantity_allocated, quantity_used, location_id, price_paid, purchase_date, purchase_source_id, current_value, value_last_updated, created_at, updated_at, manufacturer_id, scale_id, kit_type_id, manufacturer:manufacturers(name), scale:scales(name, sort_order), kit_type:kit_types(name), loc:locations(name), purchase_source:purchase_sources(name)`;
+    try {
+      const res = await serviceSupabase.from("kits").select(fullSelect).eq("user_id", userId);
+      if (res.error) throw res.error;
+      return (res.data || []).map((r: any) => ({
+        ...r,
+        catalog_number: r.catalog_number ?? null,
+        kit_material_id: r.kit_material_id ?? null,
+        kit_material: r.kit_material ?? null,
+      }));
+    } catch (e) {
+      console.warn("safeFetchKits: full select failed (run add-kit-catalog-and-material.sql if you want catalog numbers and kit materials).", e);
+      const res = await serviceSupabase.from("kits").select(coreSelect).eq("user_id", userId);
+      if (res.error) {
+        console.error("safeFetchKits core fallback also failed:", res.error);
+        return [];
+      }
+      return (res.data || []).map((r: any) => ({
+        ...r,
+        catalog_number: null,
+        kit_material_id: null,
+        kit_material: null,
+      }));
+    }
+  }
+
   const [initialParts, initialKits, initialPaints] = await Promise.all([
     safeFetch(
       "aftermarket_parts",
       `id, name, notes, image_url, quantity_owned, quantity_allocated, quantity_used, location_id, price_paid, purchase_date, purchase_source_id, current_value, value_last_updated, created_at, updated_at, manufacturer_id, scale_id, part_type_id, exclude_from_out_of_stock, designed_for_kit_id, manufacturer:manufacturers(name), scale:scales(name), part_type:part_types(name), loc:locations(name), purchase_source:purchase_sources(name), designed_for_kit:kits(id, name)`,
       USER_ID
     ),
-    serviceSupabase
-      .from("kits")
-      .select(`id, name, status, notes, barcode, box_art_url, quantity_owned, quantity_allocated, quantity_used, location_id, price_paid, purchase_date, purchase_source_id, current_value, value_last_updated, created_at, updated_at, manufacturer_id, scale_id, kit_type_id, manufacturer:manufacturers(name), scale:scales(name, sort_order), kit_type:kit_types(name), loc:locations(name), purchase_source:purchase_sources(name)`)
-      .eq("user_id", USER_ID)
-      .then(r => r.data || []),
+    safeFetchKits(USER_ID),
     safeFetch(
       "paints",
       `id, color_name, brand, notes, quantity_owned, quantity_allocated, quantity_used, location_id, price_paid, purchase_date, purchase_source_id, current_value, value_last_updated, opened, created_at, updated_at, series, fs_number, ral_number, rlm_number, ana_number, paint_type_id, paint_brand_id, exclude_from_out_of_stock, designed_for_kit_id, paint_type:paint_types(name), paint_brand:paint_brands(name), loc:locations(name), purchase_source:purchase_sources(name), designed_for_kit:kits(id, name)`,
@@ -104,6 +139,7 @@ export default async function InventoryPage() {
       scales={scales}
       partTypes={partTypes}
       kitTypes={kitTypes}
+      kitMaterials={kitMaterials}
       paintTypes={paintTypes}
       paintBrands={paintBrands}
       locations={locations}

@@ -159,6 +159,24 @@ export type Database = {
         }
         Relationships: []
       }
+      kit_materials: {
+        Row: {
+          created_at: string | null
+          id: string
+          name: string
+        }
+        Insert: {
+          created_at?: string | null
+          id?: string
+          name: string
+        }
+        Update: {
+          created_at?: string | null
+          id?: string
+          name?: string
+        }
+        Relationships: []
+      }
       kits: {
         Row: {
           barcode: string | null
@@ -168,6 +186,8 @@ export type Database = {
           difficulty: number | null
           id: string
           kit_type_id: string | null
+          kit_material_id: string | null
+          catalog_number: string | null
           location: string | null
           location_id: string | null
           manufacturer_id: string | null
@@ -195,6 +215,8 @@ export type Database = {
           difficulty?: number | null
           id?: string
           kit_type_id?: string | null
+          kit_material_id?: string | null
+          catalog_number?: string | null
           location?: string | null
           location_id?: string | null
           manufacturer_id?: string | null
@@ -220,6 +242,8 @@ export type Database = {
           difficulty?: number | null
           id?: string
           kit_type_id?: string | null
+          kit_material_id?: string | null
+          catalog_number?: string | null
           location?: string | null
           location_id?: string | null
           manufacturer_id?: string | null
@@ -266,6 +290,13 @@ export type Database = {
             columns: ["scale_id"]
             isOneToOne: false
             referencedRelation: "scales"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "kits_kit_material_id_fkey"
+            columns: ["kit_material_id"]
+            isOneToOne: false
+            referencedRelation: "kit_materials"
             referencedColumns: ["id"]
           },
         ]

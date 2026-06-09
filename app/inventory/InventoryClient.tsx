@@ -17,7 +17,9 @@ import {
   updateAftermarketPart, updateKit, updatePaint,
   uploadInventoryImage,
   createManufacturer, createScale, createPartType, createKitType, createPaintType, createPaintBrand, createLocation, createPurchaseSource,
-  getAllParts, getAllKits, getAllPaints
+  getAllParts, getAllKits, getAllPaints,
+  bulkAddPaints,
+  type PaintImportDraft,
 } from "./actions";
 
 export default function InventoryClient({
@@ -95,6 +97,14 @@ export default function InventoryClient({
     current: number;
   } | null>(null);
   const [stockAdjustAmount, setStockAdjustAmount] = useState(1);
+
+  // === Bulk Import from spreadsheet / CSV (paints-focused table entry) ===
+  const [showImportModal, setShowImportModal] = useState(false);
+  const [importText, setImportText] = useState("");
+  const [importRows, setImportRows] = useState<PaintImportDraft[]>([]);
+  const [importDefaultBrand, setImportDefaultBrand] = useState(""); // helpful when importing per-mfg tables
+  const [importStatus, setImportStatus] = useState<null | { message: string; isError?: boolean; details?: string }>(null);
+  const [isImporting, setIsImporting] = useState(false);
 
   // Detail view modals (read-only)
   const [viewingKit, setViewingKit] = useState<any>(null);
@@ -725,6 +735,261 @@ export default function InventoryClient({
     }
   };
 
+  // =====================================================
+  // Bulk Paint Import (CSV / spreadsheet paste + editable table)
+  // Supports user's per-mfg tables with common columns:
+  // qty, mfg/brand, color name, color #/code, type + FS/RAL/RLM/ANA/series etc.
+  // The preview table also allows pure manual bulk entry.
+  // =====================================================
+
+  function parseCSV(text: string): { headers: string[]; dataRows: string[][] } {
+    const lines = text.replace(/\r\n/g, "\n").replace(/\r/g, "\n").trim().split("\n");
+    if (lines.length === 0) return { headers: [], dataRows: [] };
+
+    const parseLine = (line: string): string[] => {
+      const result: string[] = [];
+      let current = "";
+      let inQuotes = false;
+      for (let i = 0; i < line.length; i++) {
+        const char = line[i];
+        if (char === '"') {
+          if (inQuotes && line[i + 1] === '"') {
+            current += '"';
+            i++;
+          } else {
+            inQuotes = !inQuotes;
+          }
+        } else if (char === "," && !inQuotes) {
+          result.push(current.trim());
+          current = "";
+        } else {
+          current += char;
+        }
+      }
+      result.push(current.trim());
+      return result;
+    };
+
+    const headers = parseLine(lines[0]).map((h) => h.replace(/^"|"$/g, ""));
+    const dataRows: string[][] = [];
+    for (let i = 1; i < lines.length; i++) {
+      if (lines[i].trim()) {
+        const cells = parseLine(lines[i]).map((c) => c.replace(/^"|"$/g, ""));
+        while (cells.length < headers.length) cells.push("");
+        dataRows.push(cells.slice(0, headers.length));
+      }
+    }
+    return { headers, dataRows };
+  }
+
+  function mapRowToDraft(headers: string[], cells: string[], defaultBrand: string): PaintImportDraft {
+    const normalize = (s: string) => (s || "").toLowerCase().replace(/[\s#\-_]/g, "");
+
+    const get = (candidates: string[]) => {
+      for (const cand of candidates) {
+        const normCand = normalize(cand);
+        const idx = headers.findIndex((h) => {
+          const normH = normalize(h);
+          const lowerH = h.toLowerCase();
+          return normH.includes(normCand) || lowerH.includes(cand.toLowerCase());
+        });
+        if (idx !== -1 && cells[idx] != null) return cells[idx].trim();
+      }
+      return "";
+    };
+
+    // Tuned for the user's described structure (per-mfg tables)
+    // color # / color code is separate from color name
+    const brandName = get(["mfg", "manufacturer", "brand", "make"]) || defaultBrand || "";
+    const typeName = get(["type", "painttype", "finish", "painttype"]);
+    const colorName = get(["colorname", "colourname", "color name", "colour name", "name"]) || "";
+    const colorCode = get(["color #", "colour #", "color#", "colour#", "color code", "colour code", "colorcode", "colourcode", "color number", "colour number", "code", "#"]);
+    const fsNumber = get(["fs", "fs#", "fsnumber", "federal"]);
+    const ralNumber = get(["ral", "ral#", "ralnumber"]);
+    const rlmNumber = get(["rlm", "rlm#", "rlmnumber"]);
+    const anaNumber = get(["ana", "ana#", "ananumber"]);
+    const series = get(["series", "line", "range"]);
+
+    let quantity = 1;
+    const qtyStr = get(["qty", "quantity", "q", "count", "owned"]);
+    if (qtyStr) {
+      const parsed = parseInt(qtyStr.replace(/[^0-9]/g, ""), 10);
+      if (!isNaN(parsed) && parsed > 0) quantity = parsed;
+    }
+
+    const locationName = get(["location", "loc", "storage", "shelf", "drawer"]);
+    const notes = get(["notes", "note", "comment", "remarks", "desc", "description"]);
+    const priceStr = get(["price", "pricepaid", "cost", "paid"]);
+    const pricePaid = priceStr ? parseFloat(priceStr.replace(/[^0-9.]/g, "")) || null : null;
+
+    return {
+      brandName: brandName || undefined,
+      typeName: typeName || undefined,
+      colorName,
+      colorCode: colorCode || undefined,
+      series: series || undefined,
+      fsNumber: fsNumber || undefined,
+      ralNumber: ralNumber || undefined,
+      rlmNumber: rlmNumber || undefined,
+      anaNumber: anaNumber || undefined,
+      quantity,
+      locationName: locationName || undefined,
+      notes: notes || undefined,
+      pricePaid,
+    };
+  }
+
+  function updateImportRow(index: number, field: keyof PaintImportDraft, value: any) {
+    setImportRows((prev) => {
+      const next = [...prev];
+      next[index] = { ...next[index], [field]: value };
+      return next;
+    });
+  }
+
+  function addImportRow() {
+    setImportRows((prev) => [
+      ...prev,
+      {
+        brandName: importDefaultBrand || "",
+        typeName: "",
+        colorName: "",
+        quantity: 1,
+      } as PaintImportDraft,
+    ]);
+  }
+
+  function removeImportRow(index: number) {
+    setImportRows((prev) => prev.filter((_, i) => i !== index));
+  }
+
+  function seedEmptyImportRows(count = 10) {
+    const base: PaintImportDraft[] = Array.from({ length: count }, () => ({
+      brandName: importDefaultBrand || "",
+      typeName: "",
+      colorName: "",
+      quantity: 1,
+    }));
+    setImportRows(base);
+    setImportText("");
+    setImportStatus(null);
+  }
+
+  function clearImport() {
+    setImportRows([]);
+    setImportText("");
+    setImportStatus(null);
+  }
+
+  async function handleParseImport() {
+    setImportStatus(null);
+    const text = importText.trim();
+    if (!text) return;
+
+    try {
+      const { headers, dataRows } = parseCSV(text);
+      if (headers.length === 0 || dataRows.length === 0) {
+        setImportStatus({ message: "Could not parse any rows. Make sure the first line contains headers.", isError: true });
+        return;
+      }
+      const mapped = dataRows.map((cells) => mapRowToDraft(headers, cells, importDefaultBrand));
+      const withNames = mapped.filter((r) => (r.colorName || "").trim().length > 0);
+      setImportRows(withNames.length > 0 ? withNames : mapped);
+      setImportStatus({ message: `Parsed ${dataRows.length} row(s). Edit the table below before importing.` });
+    } catch (e: any) {
+      setImportStatus({ message: "Failed to parse the pasted CSV text.", isError: true, details: e?.message });
+    }
+  }
+
+  function handleFileUpload(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      const text = String(ev.target?.result || "");
+      setImportText(text);
+      // Auto-parse
+      try {
+        const { headers, dataRows } = parseCSV(text);
+        if (headers.length && dataRows.length) {
+          const mapped = dataRows.map((c) => mapRowToDraft(headers, c, importDefaultBrand));
+          const withNames = mapped.filter((r) => (r.colorName || "").trim());
+          setImportRows(withNames.length ? withNames : mapped);
+          setImportStatus({ message: `Loaded ${file.name} — ${dataRows.length} rows. Review/edit the preview table.` });
+        }
+      } catch {}
+    };
+    reader.readAsText(file);
+    e.target.value = ""; // allow re-selecting same file
+  }
+
+  function handleApplyDefaultBrandToRows() {
+    if (!importDefaultBrand.trim()) return;
+    setImportRows((prev) =>
+      prev.map((r) => ({ ...r, brandName: r.brandName || importDefaultBrand.trim() }))
+    );
+  }
+
+  async function handleBulkImport() {
+    if (importRows.length === 0) return;
+
+    setIsImporting(true);
+    setImportStatus(null);
+
+    try {
+      const cleaned: PaintImportDraft[] = importRows
+        .map((r) => ({
+          ...r,
+          colorName: (r.colorName || "").trim(),
+          brandName: ((r.brandName || importDefaultBrand) || "").trim() || undefined,
+          typeName: (r.typeName || "").trim() || undefined,
+          locationName: (r.locationName || "").trim() || undefined,
+          quantity: Math.max(0, typeof r.quantity === "number" ? r.quantity : parseInt(String(r.quantity || "1"), 10) || 1),
+        }))
+        .filter((r) => r.colorName);
+
+      if (cleaned.length === 0) {
+        setImportStatus({ message: "No rows have a Color Name — nothing to import.", isError: true });
+        setIsImporting(false);
+        return;
+      }
+
+      const result = await bulkAddPaints(cleaned);
+
+      const parts: string[] = [];
+      if (result.inserted > 0) parts.push(`Imported ${result.inserted} paint(s).`);
+      if (result.createdBrands?.length) parts.push(`+${result.createdBrands.length} new brand(s)`);
+      if (result.createdTypes?.length) parts.push(`+${result.createdTypes.length} new type(s)`);
+      if (result.createdLocations?.length) parts.push(`+${result.createdLocations.length} new location(s)`);
+
+      const baseMsg = parts.join(" ") || "Import finished.";
+
+      if (result.errors && result.errors.length > 0) {
+        const sample = result.errors.slice(0, 4).map((e) => `• ${e.message}`).join("\n");
+        setImportStatus({
+          message: baseMsg + " (some issues)",
+          isError: true,
+          details: sample + (result.errors.length > 4 ? `\n(+${result.errors.length - 4} more)` : ""),
+        });
+      } else {
+        setImportStatus({ message: baseMsg });
+      }
+
+      await Promise.all([fetchPaints(), refreshLookups()]);
+
+      if (!result.errors || result.errors.length === 0) {
+        setTimeout(() => {
+          setShowImportModal(false);
+          clearImport();
+        }, 900);
+      }
+    } catch (err: any) {
+      setImportStatus({ message: "Import failed", isError: true, details: err?.message || String(err) });
+    } finally {
+      setIsImporting(false);
+    }
+  }
+
   // Opens the nice delete confirmation modal
   const openDeleteConfirm = (id: string, type: "part" | "kit" | "paint", name: string) => {
     setDeleteConfirm({ id, type, name });
@@ -1048,6 +1313,17 @@ export default function InventoryClient({
             variant="outline"
             size="sm"
             onClick={() => {
+              setImportStatus(null);
+              Promise.resolve().then(() => refreshLookups().catch(() => {})).catch(() => {});
+              setShowImportModal(true);
+            }}
+          >
+            Import Paints
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => {
               setBarcodeScanTarget("lookup");
               setShowBarcodeScanner(true);
             }}
@@ -1250,6 +1526,21 @@ export default function InventoryClient({
           <option value="">All Locations</option>
           {lookupData.locations.map(l => <option key={l.id} value={l.name}>{l.name}</option>)}
         </select>
+
+        {activeTab === "paints" && (
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => {
+              setImportStatus(null);
+              Promise.resolve().then(() => refreshLookups().catch(() => {})).catch(() => {});
+              setShowImportModal(true);
+            }}
+            className="ml-auto"
+          >
+            Import CSV / table
+          </Button>
+        )}
       </div>
 
       {/* Aftermarket Parts - Infinite Scroll */}
@@ -1495,10 +1786,23 @@ export default function InventoryClient({
       {/* Paints - Infinite Scroll */}
       {activeTab === "paints" && (
       <section>
-        <h2 className="text-xl font-semibold mb-4 flex items-center gap-2">
-          Paints
-          <span className="text-sm font-normal text-zinc-500">({displayedPaints.length})</span>
-        </h2>
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-xl font-semibold flex items-center gap-2">
+            Paints
+            <span className="text-sm font-normal text-zinc-500">({displayedPaints.length})</span>
+          </h2>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => {
+              setImportStatus(null);
+              Promise.resolve().then(() => refreshLookups().catch(() => {})).catch(() => {});
+              setShowImportModal(true);
+            }}
+          >
+            Import CSV / table
+          </Button>
+        </div>
 
         {paintsError ? (
           <div className="card p-8 text-center text-red-400 border border-red-500/50">Error loading paints: {paintsError}</div>
@@ -2670,6 +2974,198 @@ export default function InventoryClient({
               >
                 Apply Change
               </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Bulk Import Modal — spreadsheet / CSV paste + live editable table for paints */}
+      {showImportModal && (
+        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/70 p-3 md:p-6 overflow-auto">
+          <div className="bg-zinc-900 rounded-2xl border border-zinc-800 w-full max-w-6xl max-h-[92vh] flex flex-col">
+            {/* Header */}
+            <div className="flex items-center justify-between px-5 py-4 border-b border-zinc-800">
+              <div>
+                <div className="text-xl font-semibold">Import Paints from Spreadsheet / Table</div>
+                <div className="text-xs text-zinc-400 mt-0.5">
+                  Paste CSV text or upload a file from your per-mfg tables. Edit directly in the grid below. New brands/types/locations are created automatically.
+                </div>
+              </div>
+              <Button variant="outline" onClick={() => { setShowImportModal(false); /* keep data in case user reopens */ }}>Close</Button>
+            </div>
+
+            <div className="p-5 overflow-auto flex-1 space-y-4">
+              {/* Controls */}
+              <div className="flex flex-col md:flex-row gap-3">
+                <div className="flex-1">
+                  <label className="block text-xs text-zinc-400 mb-1">Paste CSV text (first row = headers)</label>
+                  <textarea
+                    value={importText}
+                    onChange={(e) => setImportText(e.target.value)}
+                    placeholder={`Brand,Color Name,Type,Qty,FS#,RAL#,Notes\nVallejo,Flat White,Acrylic,2,FS 37875,,primer white\n...`}
+                    className="w-full h-28 font-mono text-xs rounded-xl border border-zinc-700 bg-zinc-950 p-3"
+                  />
+                  <div className="mt-2 flex gap-2 flex-wrap">
+                    <Button size="sm" onClick={handleParseImport} disabled={!importText.trim()}>Parse / Refresh Table</Button>
+                    <label className="inline-flex items-center gap-2 text-sm border border-zinc-700 rounded-xl px-3 py-1 cursor-pointer hover:bg-zinc-950">
+                      Upload .csv file
+                      <input type="file" accept=".csv,text/csv" className="hidden" onChange={handleFileUpload} />
+                    </label>
+                    <Button size="sm" variant="outline" onClick={() => seedEmptyImportRows(10)}>Start blank table (manual entry)</Button>
+                    <Button size="sm" variant="outline" onClick={clearImport}>Clear all</Button>
+                  </div>
+                </div>
+
+                <div className="w-full md:w-72">
+                  <label className="block text-xs text-zinc-400 mb-1">Default Brand (for per-mfg tables / files without a brand column)</label>
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      value={importDefaultBrand}
+                      onChange={(e) => setImportDefaultBrand(e.target.value)}
+                      placeholder="e.g. Vallejo or AK Interactive"
+                      className="flex-1 rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm"
+                    />
+                    <Button size="sm" variant="outline" onClick={handleApplyDefaultBrandToRows} disabled={!importDefaultBrand.trim()}>
+                      Apply to rows
+                    </Button>
+                  </div>
+                  <div className="text-[10px] text-zinc-500 mt-1">You can still edit Brand per row in the table below.</div>
+                </div>
+              </div>
+
+              {importStatus && (
+                <div className={`text-sm p-3 rounded-xl border ${importStatus.isError ? "border-red-500/40 bg-red-950/20 text-red-300" : "border-emerald-500/30 bg-emerald-950/10 text-emerald-300"}`}>
+                  {importStatus.message}
+                  {importStatus.details && (
+                    <pre className="mt-1 text-xs whitespace-pre-wrap opacity-80">{importStatus.details}</pre>
+                  )}
+                </div>
+              )}
+
+              {/* Editable preview table (the spreadsheet experience) */}
+              <div>
+                <div className="flex items-center justify-between mb-2">
+                  <div className="text-sm font-medium">Preview &amp; Edit ({importRows.length} rows)</div>
+                  <div className="flex gap-2">
+                    <Button size="sm" variant="outline" onClick={addImportRow}>+ Add row</Button>
+                    <Button size="sm" variant="outline" onClick={() => setImportRows((prev) => prev.filter(r => (r.colorName || "").trim()))}>Remove empty</Button>
+                  </div>
+                </div>
+
+                {importRows.length === 0 ? (
+                  <div className="card p-6 text-sm text-zinc-400">
+                    No rows yet. Paste CSV + Parse, upload a file, or click “Start blank table”.
+                  </div>
+                ) : (
+                  <div className="overflow-x-auto border border-zinc-800 rounded-xl">
+                    <table className="min-w-full text-xs">
+                      <thead className="bg-zinc-950 text-zinc-400">
+                        <tr>
+                          <th className="px-2 py-2 text-left font-normal">Brand</th>
+                          <th className="px-2 py-2 text-left font-normal">Type</th>
+                          <th className="px-2 py-2 text-left font-normal">Color Name *</th>
+                          <th className="px-2 py-2 text-left font-normal">Code</th>
+                          <th className="px-2 py-2 text-left font-normal">FS#</th>
+                          <th className="px-2 py-2 text-left font-normal">RAL#</th>
+                          <th className="px-2 py-2 text-left font-normal">RLM#</th>
+                          <th className="px-2 py-2 text-left font-normal">ANA#</th>
+                          <th className="px-2 py-2 w-14 text-left font-normal">Qty</th>
+                          <th className="px-2 py-2 text-left font-normal">Location</th>
+                          <th className="px-2 py-2 text-left font-normal">Notes</th>
+                          <th className="px-2 py-2 w-16 text-left font-normal">Price</th>
+                          <th className="px-1 py-2 w-8"></th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-zinc-800">
+                        {importRows.map((row, idx) => (
+                          <tr key={idx} className="hover:bg-zinc-950/60">
+                            <td className="px-1 py-1">
+                              <input
+                                value={row.brandName || ""}
+                                onChange={(e) => updateImportRow(idx, "brandName", e.target.value)}
+                                className="w-28 rounded border border-zinc-700 bg-zinc-950 px-1.5 py-1 text-xs"
+                                placeholder="Brand"
+                              />
+                            </td>
+                            <td className="px-1 py-1">
+                              <input
+                                value={row.typeName || ""}
+                                onChange={(e) => updateImportRow(idx, "typeName", e.target.value)}
+                                className="w-24 rounded border border-zinc-700 bg-zinc-950 px-1.5 py-1 text-xs"
+                                placeholder="Type"
+                              />
+                            </td>
+                            <td className="px-1 py-1">
+                              <input
+                                value={row.colorName || ""}
+                                onChange={(e) => updateImportRow(idx, "colorName", e.target.value)}
+                                className="w-44 rounded border border-zinc-700 bg-zinc-950 px-1.5 py-1 text-xs font-medium"
+                                placeholder="Color name (required)"
+                              />
+                            </td>
+                            <td className="px-1 py-1">
+                              <input value={row.colorCode || ""} onChange={(e) => updateImportRow(idx, "colorCode", e.target.value)} className="w-20 rounded border border-zinc-700 bg-zinc-950 px-1.5 py-1 text-xs" />
+                            </td>
+                            <td className="px-1 py-1">
+                              <input value={row.fsNumber || ""} onChange={(e) => updateImportRow(idx, "fsNumber", e.target.value)} className="w-20 rounded border border-zinc-700 bg-zinc-950 px-1.5 py-1 text-xs" />
+                            </td>
+                            <td className="px-1 py-1">
+                              <input value={row.ralNumber || ""} onChange={(e) => updateImportRow(idx, "ralNumber", e.target.value)} className="w-20 rounded border border-zinc-700 bg-zinc-950 px-1.5 py-1 text-xs" />
+                            </td>
+                            <td className="px-1 py-1">
+                              <input value={row.rlmNumber || ""} onChange={(e) => updateImportRow(idx, "rlmNumber", e.target.value)} className="w-20 rounded border border-zinc-700 bg-zinc-950 px-1.5 py-1 text-xs" />
+                            </td>
+                            <td className="px-1 py-1">
+                              <input value={row.anaNumber || ""} onChange={(e) => updateImportRow(idx, "anaNumber", e.target.value)} className="w-20 rounded border border-zinc-700 bg-zinc-950 px-1.5 py-1 text-xs" />
+                            </td>
+                            <td className="px-1 py-1">
+                              <input
+                                type="number"
+                                value={row.quantity ?? 1}
+                                onChange={(e) => updateImportRow(idx, "quantity", parseInt(e.target.value) || 1)}
+                                className="w-14 rounded border border-zinc-700 bg-zinc-950 px-1.5 py-1 text-xs tabular-nums"
+                              />
+                            </td>
+                            <td className="px-1 py-1">
+                              <input value={row.locationName || ""} onChange={(e) => updateImportRow(idx, "locationName", e.target.value)} className="w-28 rounded border border-zinc-700 bg-zinc-950 px-1.5 py-1 text-xs" />
+                            </td>
+                            <td className="px-1 py-1">
+                              <input value={row.notes || ""} onChange={(e) => updateImportRow(idx, "notes", e.target.value)} className="w-40 rounded border border-zinc-700 bg-zinc-950 px-1.5 py-1 text-xs" />
+                            </td>
+                            <td className="px-1 py-1">
+                              <input
+                                type="number"
+                                step="0.01"
+                                value={row.pricePaid ?? ""}
+                                onChange={(e) => updateImportRow(idx, "pricePaid", e.target.value ? parseFloat(e.target.value) : null)}
+                                className="w-16 rounded border border-zinc-700 bg-zinc-950 px-1.5 py-1 text-xs tabular-nums"
+                              />
+                            </td>
+                            <td className="px-1 py-1 text-center">
+                              <button onClick={() => removeImportRow(idx)} className="text-red-400 hover:text-red-300 px-1" title="Remove row">×</button>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+                <div className="mt-1 text-[10px] text-zinc-500">Tip: Color Name is required. Brand/Type/Location will be created if they don’t exist yet. The table is fully editable — treat it like a mini spreadsheet.</div>
+              </div>
+            </div>
+
+            {/* Footer actions */}
+            <div className="px-5 py-4 border-t border-zinc-800 flex items-center justify-between bg-zinc-950/50 rounded-b-2xl">
+              <div className="text-xs text-zinc-400">
+                {importRows.length} row(s) in table • Will create missing brands/types/locations automatically
+              </div>
+              <div className="flex gap-3">
+                <Button variant="outline" onClick={clearImport} disabled={isImporting}>Clear table</Button>
+                <Button onClick={handleBulkImport} disabled={isImporting || importRows.length === 0}>
+                  {isImporting ? "Importing..." : `Import ${importRows.filter(r => (r.colorName || "").trim()).length || importRows.length} paints`}
+                </Button>
+              </div>
             </div>
           </div>
         </div>

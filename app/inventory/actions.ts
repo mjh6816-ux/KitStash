@@ -767,6 +767,248 @@ export async function createPurchaseSource(name: string) {
 }
 
 // ============================================
+// Bulk import for paints (spreadsheet / CSV driven)
+// Supports flexible name-based resolution for brands, types, locations.
+// Creates missing lookup values on the fly (like quick-add).
+// Designed for users who have per-manufacturer tables with columns like:
+// qty, mfg/brand, color name, color #/code, type, FS, RAL, RLM, ANA, series, notes, location, price, etc.
+// ============================================
+
+export type PaintImportDraft = {
+  brandName?: string | null;
+  typeName?: string | null;
+  colorName: string;
+  colorCode?: string | null;
+  series?: string | null;
+  fsNumber?: string | null;
+  ralNumber?: string | null;
+  rlmNumber?: string | null;
+  anaNumber?: string | null;
+  quantity?: number | null;
+  locationName?: string | null;
+  notes?: string | null;
+  pricePaid?: number | null;
+};
+
+export async function bulkAddPaints(drafts: PaintImportDraft[]) {
+  const supabase = createServiceClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.SUPABASE_SERVICE_ROLE_KEY!,
+    { auth: { autoRefreshToken: false, persistSession: false } }
+  );
+
+  // Filter out completely blank rows early
+  const validDrafts = drafts.filter((d) => d && (d.colorName || "").trim());
+
+  if (validDrafts.length === 0) {
+    return { inserted: 0, createdBrands: [], createdTypes: [], createdLocations: [], errors: [] };
+  }
+
+  // 1. Load existing lookups (case-insensitive matching)
+  const [
+    { data: existingBrands },
+    { data: existingTypes },
+    { data: existingLocations },
+  ] = await Promise.all([
+    supabase.from("paint_brands").select("id, name"),
+    supabase.from("paint_types").select("id, name"),
+    supabase.from("locations").select("id, name"),
+  ]);
+
+  const brandMap = new Map<string, string>(); // lower name -> id
+  (existingBrands || []).forEach((b: any) => {
+    if (b.name) brandMap.set(b.name.toLowerCase().trim(), b.id);
+  });
+
+  const typeMap = new Map<string, string>();
+  (existingTypes || []).forEach((t: any) => {
+    if (t.name) typeMap.set(t.name.toLowerCase().trim(), t.id);
+  });
+
+  const locationMap = new Map<string, string>();
+  (existingLocations || []).forEach((l: any) => {
+    if (l.name) locationMap.set(l.name.toLowerCase().trim(), l.id);
+  });
+
+  const createdBrands: string[] = [];
+  const createdTypes: string[] = [];
+  const createdLocations: string[] = [];
+  const errors: Array<{ index: number; colorName: string; message: string }> = [];
+
+  // 2. Resolve or create brands, types, locations for all drafts
+  // Collect unique needed names
+  const neededBrands = new Set<string>();
+  const neededTypes = new Set<string>();
+  const neededLocations = new Set<string>();
+
+  validDrafts.forEach((d) => {
+    const b = (d.brandName || "").trim();
+    if (b && !brandMap.has(b.toLowerCase())) neededBrands.add(b);
+
+    const t = (d.typeName || "").trim();
+    if (t && !typeMap.has(t.toLowerCase())) neededTypes.add(t);
+
+    const l = (d.locationName || "").trim();
+    if (l && !locationMap.has(l.toLowerCase())) neededLocations.add(l);
+  });
+
+  // Create missing brands
+  for (const name of neededBrands) {
+    try {
+      const { data, error } = await supabase
+        .from("paint_brands")
+        .insert({ name: name.trim() })
+        .select("id, name")
+        .single();
+      if (!error && data) {
+        brandMap.set(name.toLowerCase().trim(), data.id);
+        createdBrands.push(name);
+      } else if (error) {
+        console.warn("bulkAddPaints: failed to create brand", name, error);
+      }
+    } catch (e: any) {
+      console.warn("bulkAddPaints brand create error", name, e);
+    }
+  }
+
+  // Create missing types
+  for (const name of neededTypes) {
+    try {
+      const { data, error } = await supabase
+        .from("paint_types")
+        .insert({ name: name.trim() })
+        .select("id, name")
+        .single();
+      if (!error && data) {
+        typeMap.set(name.toLowerCase().trim(), data.id);
+        createdTypes.push(name);
+      }
+    } catch (e: any) {
+      console.warn("bulkAddPaints type create error", name, e);
+    }
+  }
+
+  // Create missing locations
+  for (const name of neededLocations) {
+    try {
+      const { data, error } = await supabase
+        .from("locations")
+        .insert({ name: name.trim() })
+        .select("id, name")
+        .single();
+      if (!error && data) {
+        locationMap.set(name.toLowerCase().trim(), data.id);
+        createdLocations.push(name);
+      }
+    } catch (e: any) {
+      console.warn("bulkAddPaints location create error", name, e);
+    }
+  }
+
+  // 3. Build insert payloads
+  const inserts: any[] = [];
+  validDrafts.forEach((d, idx) => {
+    const colorName = (d.colorName || "").trim();
+    if (!colorName) {
+      errors.push({ index: idx, colorName: "", message: "Missing color name" });
+      return;
+    }
+
+    const brandKey = (d.brandName || "").trim().toLowerCase();
+    const typeKey = (d.typeName || "").trim().toLowerCase();
+    const locKey = (d.locationName || "").trim().toLowerCase();
+
+    const paintBrandId = brandKey ? brandMap.get(brandKey) || null : null;
+    const paintTypeId = typeKey ? typeMap.get(typeKey) || null : null;
+    const locationId = locKey ? locationMap.get(locKey) || null : null;
+
+    const quantity = Math.max(0, d.quantity ?? 1);
+
+    const row: any = {
+      user_id: USER_ID,
+      color_name: colorName,
+      paint_brand_id: paintBrandId,
+      paint_type_id: paintTypeId,
+      location_id: locationId,
+      color_code: d.colorCode ? d.colorCode.trim() : null,
+      series: d.series ? d.series.trim() : null,
+      fs_number: d.fsNumber ? d.fsNumber.trim() : null,
+      ral_number: d.ralNumber ? d.ralNumber.trim() : null,
+      rlm_number: d.rlmNumber ? d.rlmNumber.trim() : null,
+      ana_number: d.anaNumber ? d.anaNumber.trim() : null,
+      quantity_owned: quantity,
+      quantity_allocated: 0,
+      quantity_used: 0,
+      notes: d.notes ? d.notes.trim() : null,
+      price_paid: d.pricePaid != null ? d.pricePaid : null,
+      opened: false,
+      // Newer optional columns will be stripped on fallback if missing in DB
+      exclude_from_out_of_stock: false,
+      designed_for_kit_id: null,
+    };
+
+    inserts.push({ row, originalIndex: idx, colorName });
+  });
+
+  if (inserts.length === 0) {
+    return {
+      inserted: 0,
+      createdBrands,
+      createdTypes,
+      createdLocations,
+      errors: errors.length ? errors : [{ index: -1, colorName: "", message: "No valid rows after processing" }],
+    };
+  }
+
+  // 4. Perform batch insert with defensive fallback for optional columns
+  const payload = inserts.map((i) => i.row);
+
+  let { data, error } = await supabase
+    .from("paints")
+    .insert(payload as any)
+    .select("id, color_name");
+
+  if (error && error.message && (error.message.includes("exclude_from_out_of_stock") || error.message.includes("designed_for_kit_id"))) {
+    console.warn("bulkAddPaints: newer columns missing in schema, retrying without them");
+    const stripped = payload.map((r: any) => {
+      const copy = { ...r };
+      delete copy.exclude_from_out_of_stock;
+      delete copy.designed_for_kit_id;
+      return copy;
+    });
+    const retry = await supabase.from("paints").insert(stripped as any).select("id, color_name");
+    data = retry.data;
+    error = retry.error;
+  }
+
+  if (error) {
+    console.error("❌ bulkAddPaints FAILED:", error);
+    // Still report partial? For simplicity surface the error and any lookup creations
+    return {
+      inserted: 0,
+      createdBrands,
+      createdTypes,
+      createdLocations,
+      errors: [{ index: -1, colorName: "", message: `Bulk insert failed: ${error.message || error.code}` }],
+    };
+  }
+
+  const inserted = data?.length || inserts.length;
+
+  console.log(`✅ bulkAddPaints SUCCESS — inserted ${inserted} paints. Created ${createdBrands.length} brands, ${createdTypes.length} types, ${createdLocations.length} locations.`);
+
+  revalidatePath("/inventory");
+
+  return {
+    inserted,
+    createdBrands,
+    createdTypes,
+    createdLocations,
+    errors,
+  };
+}
+
+// ============================================
 // Export functionality
 // ============================================
 

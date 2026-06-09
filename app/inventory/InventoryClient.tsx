@@ -1278,7 +1278,7 @@ export default function InventoryClient({
   const displayedPaintsBase = paints.filter((item: any) => {
     const name = item.color_name || '';
     const matchesSearch = !searchTerm || name.toLowerCase().includes(searchTerm.toLowerCase());
-    const matchesManufacturer = !filterManufacturer || item.brand === filterManufacturer;
+    const matchesManufacturer = !filterManufacturer || (item.paint_brand?.name || item.brand) === filterManufacturer;
     const matchesPaintType = !filterPaintType || item.paint_type?.name === filterPaintType;
 
     let matchesStock = true;
@@ -1290,6 +1290,14 @@ export default function InventoryClient({
     return matchesSearch && matchesManufacturer && matchesPaintType && matchesStock && matchesLocation;
   });
   const displayedPaints = applySort(displayedPaintsBase, sortOption, 'color_name', 'paint_brand');
+
+  const brandFilterOptions = activeTab === "paints"
+    ? Array.from(new Set(
+        paints
+          .map((p: any) => p.paint_brand?.name || p.brand)
+          .filter((n: string | null | undefined): n is string => !!n)
+      )).sort((a, b) => a.localeCompare(b))
+    : lookupData.manufacturers.map((m: any) => m.name);
 
   return (
     <div className="p-6 md:p-8">
@@ -1434,12 +1442,12 @@ export default function InventoryClient({
         >
           <option value="name-asc">Name A–Z</option>
           <option value="name-desc">Name Z–A</option>
-          <option value="manufacturer-asc">Manufacturer A–Z</option>
-          <option value="manufacturer-desc">Manufacturer Z–A</option>
+          <option value="manufacturer-asc">{activeTab === "paints" ? "Paint Brand A–Z" : "Manufacturer A–Z"}</option>
+          <option value="manufacturer-desc">{activeTab === "paints" ? "Paint Brand Z–A" : "Manufacturer Z–A"}</option>
           <option value="scale-asc">Scale (small to large)</option>
           <option value="scale-desc">Scale (large to small)</option>
-          <option value="type-asc">Type A–Z</option>
-          <option value="type-desc">Type Z–A</option>
+          <option value="type-asc">{activeTab === "paints" ? "Paint Type A–Z" : "Type A–Z"}</option>
+          <option value="type-desc">{activeTab === "paints" ? "Paint Type Z–A" : "Type Z–A"}</option>
           <option value="newest">Recently Added</option>
           <option value="oldest">Oldest First</option>
           <option value="updated-desc">Last Modified</option>
@@ -1473,8 +1481,10 @@ export default function InventoryClient({
           onChange={(e) => updateCurrentTab({ filterManufacturer: e.target.value })}
           className="rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-2 text-sm"
         >
-          <option value="">All Manufacturers</option>
-          {lookupData.manufacturers.map(m => <option key={m.id} value={m.name}>{m.name}</option>)}
+          <option value="">{activeTab === "paints" ? "All Paint Brands" : "All Manufacturers"}</option>
+          {brandFilterOptions.map((name: string) => (
+            <option key={name} value={name}>{name}</option>
+          ))}
         </select>
 
         <select
@@ -2279,6 +2289,19 @@ export default function InventoryClient({
                       <input type="checkbox" name="excludeFromOutOfStock" className="rounded" />
                       Exclude from Out of Stock alerts (specialized/project-specific item, e.g. photoetch for one model)
                     </label>
+
+                    {/* Easy add new location at bottom of form */}
+                    <div className="flex items-center gap-1 pt-1">
+                      <input
+                        type="text"
+                        placeholder="New Location"
+                        value={quickAddValues.location}
+                        onChange={(e) => updateQuickAdd("location", e.target.value)}
+                        className="flex-1 rounded-lg border border-zinc-700 bg-zinc-950 px-2 py-1 text-xs"
+                        onKeyDown={(e) => e.key === "Enter" && handleQuickAdd("location")}
+                      />
+                      <Button type="button" variant="outline" size="sm" onClick={() => handleQuickAdd("location")} className="h-6 w-6 p-0 text-xs flex items-center justify-center">+</Button>
+                    </div>
                   </>
                 )}
                 <div className="flex gap-2 pt-2">
@@ -2578,6 +2601,20 @@ export default function InventoryClient({
                   className="w-full rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm"
                   rows={2}
                 />
+
+                {/* Easy add new location at bottom of form */}
+                <div className="flex items-center gap-1 pt-1">
+                  <input
+                    type="text"
+                    placeholder="New Location"
+                    value={quickAddValues.location}
+                    onChange={(e) => updateQuickAdd("location", e.target.value)}
+                    className="flex-1 rounded-lg border border-zinc-700 bg-zinc-950 px-2 py-1 text-xs"
+                    onKeyDown={(e) => e.key === "Enter" && handleQuickAdd("location")}
+                  />
+                  <Button type="button" variant="outline" size="sm" onClick={() => handleQuickAdd("location")} className="h-6 w-6 p-0 text-xs flex items-center justify-center">+</Button>
+                </div>
+
                 <div className="flex gap-2 pt-2">
                   <Button type="button" variant="outline" onClick={() => { setAddError(null); setShowAddModal(false); setEditingItem(null); setFormValues(null); setAddBarcode(""); }} className="flex-1">Cancel</Button>
                   <Button type="submit" className="flex-1">{editingItem ? "Save Changes" : "Add Kit"}</Button>
@@ -2762,6 +2799,19 @@ export default function InventoryClient({
                   Exclude from Out of Stock alerts (specialized/project-specific item, e.g. photoetch for one model)
                 </label>
 
+                {/* Easy add new location at bottom of form */}
+                <div className="flex items-center gap-1 pt-1">
+                  <input
+                    type="text"
+                    placeholder="New Location"
+                    value={quickAddValues.location}
+                    onChange={(e) => updateQuickAdd("location", e.target.value)}
+                    className="flex-1 rounded-lg border border-zinc-700 bg-zinc-950 px-2 py-1 text-xs"
+                    onKeyDown={(e) => e.key === "Enter" && handleQuickAdd("location")}
+                  />
+                  <Button type="button" variant="outline" size="sm" onClick={() => handleQuickAdd("location")} className="h-6 w-6 p-0 text-xs flex items-center justify-center">+</Button>
+                </div>
+
                 <div className="flex gap-2 pt-2">
                   <Button type="button" variant="outline" onClick={() => { setAddError(null); setShowAddModal(false); setEditingItem(null); setFormValues(null); setAddBarcode(""); }} className="flex-1">Cancel</Button>
                   <Button type="submit" className="flex-1">{editingItem ? "Save Changes" : "Add Paint"}</Button>
@@ -2869,18 +2919,6 @@ export default function InventoryClient({
                   </>
                 )}
 
-                {/* Location is useful for all types */}
-                <div className="flex items-center gap-1 col-span-2">
-                  <input
-                    type="text"
-                    placeholder="New Location"
-                    value={quickAddValues.location}
-                    onChange={(e) => updateQuickAdd("location", e.target.value)}
-                    className="flex-1 rounded-lg border border-zinc-700 bg-zinc-950 px-2 py-1 text-xs"
-                    onKeyDown={(e) => e.key === "Enter" && handleQuickAdd("location")}
-                  />
-                  <Button type="button" variant="outline" onClick={() => handleQuickAdd("location")} className="h-6 w-6 p-0 text-xs flex items-center justify-center flex-shrink-0">+</Button>
-                </div>
               </div>
             </div>
 
